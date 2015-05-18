@@ -1,0 +1,117 @@
+# Copyright (c) 2015 Hanspeter Portner (dev@open-music-kontrollers.ch)
+#
+# This is free software: you can redistribute it and/or modify
+# it under the terms of the Artistic License 2.0 as published by
+# The Perl Foundation.
+#
+# This source is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# Artistic License 2.0 for more details.
+#
+# You should have received a copy of the Artistic License 2.0
+# along the source as a COPYING file. If not, obtain it from
+# http://www.perlfoundation.org/artistic_license_2_0.
+
+@prefix lv2:      <http://lv2plug.in/ns/lv2core#> .
+@prefix owl:			<http://www.w3.org/2002/07/owl#> .
+@prefix rdfs:     <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ui:       <http://lv2plug.in/ns/extensions/ui#> .
+@prefix kx:				<http://kxstudio.sf.net/ns/lv2ext/external-ui#> .
+
+@prefix rtmidi:	  <http://open-music-kontrollers.ch/lv2/rtmidi#> .
+@prefix osc_io:	  <http://open-music-kontrollers.ch/lv2/osc_io#> .
+@prefix synthpod: <http://open-music-kontrollers.ch/lv2/synthpod#> .
+
+# to please sord_validate
+ui:EoUI
+	a rdfs:Class, owl:Class ;
+	rdfs:subClassOf ui:UI .
+kx:Widget
+	a rdfs:Class, owl:Class ;
+	rdfs:subClassOf ui:UI .
+kx:Host
+	a lv2:Feature .
+
+# RtMidi
+rtmidi:out
+	a lv2:Plugin ;
+	lv2:binary <rtmidi@LIB_EXT@> ;
+	rdfs:seeAlso <rtmidi.ttl> .
+
+rtmidi:in
+	a lv2:Plugin ;
+	lv2:binary <rtmidi@LIB_EXT@> ;
+	rdfs:seeAlso <rtmidi.ttl> .
+
+# OSC
+osc_io:io
+	a lv2:Plugin ;
+	lv2:binary <osc_io@LIB_EXT@> ;
+	rdfs:seeAlso <osc_io.ttl> .
+
+# Synthpod Source
+synthpod:source
+	a lv2:Plugin ;
+	lv2:binary <synthpod@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+
+# Synthpod Sink
+synthpod:sink
+	a lv2:Plugin ;
+	lv2:binary <synthpod@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+
+# Synthpod Stereo
+synthpod:stereo
+	a lv2:Plugin ;
+	lv2:binary <synthpod@LIB_EXT@> ;
+	#@EO_UI_WRAP@ui:ui synthpod:common_eo ;
+	@UI_UI_WRAP@ui:ui synthpod:common_ui ;
+	@KX_UI_WRAP@ui:ui synthpod:common_kx ;
+	#@X11_UI_WRAP@ui:ui synthpod:common_x11 ;
+	rdfs:seeAlso <synthpod.ttl> .
+
+synthpod:common_eo
+	a ui:EoUI ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+synthpod:common_ui
+	a ui:UI ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+synthpod:common_kx
+	a kx:Widget ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+synthpod:common_x11
+	a ui:X11UI ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+
+# Synthpod Keyboard
+synthpod:keyboard
+	a lv2:Plugin ;
+	lv2:binary <synthpod@LIB_EXT@> ;
+	@EO_UI_WRAP@ui:ui synthpod:keyboard_eo ;
+	@UI_UI_WRAP@ui:ui synthpod:keyboard_ui ;
+	@KX_UI_WRAP@ui:ui synthpod:keyboard_kx ;
+	@X11_UI_WRAP@ui:ui synthpod:keyboard_x11 ;
+	rdfs:seeAlso <synthpod.ttl> .
+
+synthpod:keyboard_eo
+	a ui:EoUI ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+synthpod:keyboard_ui
+	a ui:UI ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+synthpod:keyboard_kx
+	a kx:Widget ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
+synthpod:keyboard_x11
+	a ui:X11UI ;
+	ui:binary <synthpod_ui@LIB_EXT@> ;
+	rdfs:seeAlso <synthpod.ttl> .
