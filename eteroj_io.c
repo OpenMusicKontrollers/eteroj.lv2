@@ -37,11 +37,10 @@ typedef enum _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
 
 enum _plugstate_t {
-	STATE_NONE					= 0,
+	STATE_DISCONNECTED	= 0,
 	STATE_TIMEDOUT			= 1,
-	STATE_RESOLVED			= 2,
-	STATE_CONNECTED			= 3,
-	STATE_DISCONNECTED	= 4
+	STATE_READY					= 2,
+	STATE_CONNECTED			= 3
 };
 
 struct _plughandle_t {
@@ -49,9 +48,8 @@ struct _plughandle_t {
 	struct {
 		LV2_URID osc_event;
 		LV2_URID state_default;
+		LV2_URID eteroj_event;
 		LV2_URID eteroj_url;
-		LV2_URID eteroj_trig;
-		LV2_URID eteroj_dirty;
 		
 		LV2_URID log_note;
 		LV2_URID log_error;
@@ -61,19 +59,25 @@ struct _plughandle_t {
 	osc_forge_t oforge;
 	LV2_Atom_Forge forge;
 
-	char *osc_url;
-	volatile int dirty;
+	char osc_url [512];
 
 	LV2_Log_Log *log;
 
-	const LV2_Atom_Sequence *osc_sink;
-	LV2_Atom_Sequence *osc_source;
+	const LV2_Atom_Sequence *osc_in;
+	LV2_Atom_Sequence *osc_out;
 	float *state;
+	const LV2_Atom_Sequence *control;
+	LV2_Atom_Sequence *notify;
 
 	uv_thread_t thread;
 	uv_loop_t loop;
 	uv_async_t quit;
+	uv_async_t wake;
 	uv_async_t flush;
+		
+	varchunk_t *ui_to_worker;
+	varchunk_t *state_to_worker;
+	varchunk_t *from_worker;
 
 	struct {
 		osc_stream_driver_t driver;
@@ -150,19 +154,13 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 	if(type != handle->forge.String)
 		return LV2_STATE_ERR_BAD_TYPE;
 
-	// check flags
-	/* no need to check, as string IS POD and IS PORTABLE everywhere
-	if(  !(flags2 & LV2_STATE_IS_POD)
-		|| !(flags2 & LV2_STATE_IS_PORTABLE) )
-		return LV2_STATE_ERR_BAD_FLAGS;
-	*/
-
-	if(osc_url && size)
+	char *url;
+	if((url = varchunk_write_request(handle->state_to_worker, size)))
 	{
-		if(handle->osc_url)
-			free(handle->osc_url);
-		handle->osc_url = strdup(osc_url);
-		//handle->dirty = 1; // atomic instruction //FIXME
+		strcpy(url, osc_url);
+
+		varchunk_write_advance(handle->state_to_worker, size);
+		uv_async_send(&handle->wake);
 	}
 
 	return LV2_STATE_SUCCESS;
@@ -242,7 +240,7 @@ _resolve(osc_time_t timestamp, const char *path, const char *fmt,
 	plughandle_t *handle = data;
 
 	//TODO
-	*handle->state = STATE_RESOLVED;
+	*handle->state = STATE_READY;
 
 	return 1;
 }
@@ -278,7 +276,7 @@ _disconnect(osc_time_t timestamp, const char *path, const char *fmt,
 	plughandle_t *handle = data;
 
 	//TODO
-	*handle->state = STATE_DISCONNECTED;
+	*handle->state = STATE_READY;
 
 	return 1;
 }
@@ -294,6 +292,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 
 	osc_data_t *ptr = buf;
 
+	lv2_atom_forge_frame_time(forge, 0); //TODO
 	osc_forge_message_push(&handle->oforge, forge, &obj_frame, &tup_frame,
 		path, fmt);
 
@@ -418,7 +417,6 @@ _unroll_message(osc_data_t *buf, size_t size, void *data)
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	lv2_atom_forge_frame_time(forge, 0); //TODO
 	osc_dispatch_method(OSC_IMMEDIATE, buf, size, (osc_method_t *)methods,
 		NULL, NULL, handle);
 }
@@ -467,12 +465,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		LV2_OSC__OscEvent);
 	handle->uris.state_default = handle->map->map(handle->map->handle,
 		LV2_STATE__loadDefaultState);
+	handle->uris.eteroj_event = handle->map->map(handle->map->handle,
+		ETEROJ_EVENT_URI);
 	handle->uris.eteroj_url = handle->map->map(handle->map->handle,
 		ETEROJ_URL_URI);
-	handle->uris.eteroj_trig = handle->map->map(handle->map->handle,
-		ETEROJ_TRIG_URI);
-	handle->uris.eteroj_dirty = handle->map->map(handle->map->handle,
-		ETEROJ_DIRTY_URI);
 	handle->uris.log_note = handle->map->map(handle->map->handle,
 		LV2_LOG__Note);
 	handle->uris.log_error = handle->map->map(handle->map->handle,
@@ -486,7 +482,11 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	// init data
 	handle->data.from_worker = varchunk_new(BUF_SIZE);
 	handle->data.to_worker = varchunk_new(BUF_SIZE);
-	if(!handle->data.from_worker || !handle->data.to_worker)
+	handle->ui_to_worker = varchunk_new(1024);
+	handle->state_to_worker = varchunk_new(1024);
+	handle->from_worker = varchunk_new(1024);
+	if(  !handle->data.from_worker || !handle->data.to_worker
+		|| !handle->ui_to_worker || !handle->state_to_worker || !handle->from_worker)
 	{
 		free(handle);
 		return NULL;
@@ -497,12 +497,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.send_req = _data_send_req;
 	handle->data.driver.send_adv = _data_send_adv;
 
-	//handle->osc_url = strdup("osc.udp4://:9999");
-	//handle->osc_url = strdup("osc.udp6://:9999");
-	//handle->osc_url = strdup("osc.tcp4://:9999");
-	handle->osc_url = strdup("osc.tcp6://:9999");
-	//handle->osc_url = strdup("osc.slip.tcp4://:9999");
-	//handle->osc_url = strdup("osc.slip.tcp6://:9999");
+	strcpy(handle->osc_url, "osc.udp4://:9090");
 
 	return handle;
 }
@@ -515,13 +510,19 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 	switch(port)
 	{
 		case 0:
-			handle->osc_sink = (const LV2_Atom_Sequence *)data;
+			handle->osc_in = (const LV2_Atom_Sequence *)data;
 			break;
 		case 1:
-			handle->osc_source = (LV2_Atom_Sequence *)data;
+			handle->osc_out = (LV2_Atom_Sequence *)data;
 			break;
 		case 2:
 			handle->state = (float *)data;
+			break;
+		case 3:
+			handle->control = (const LV2_Atom_Sequence *)data;
+			break;
+		case 4:
+			handle->notify = (LV2_Atom_Sequence *)data;
 			break;
 		default:
 			break;
@@ -536,7 +537,9 @@ _quit(uv_async_t *quit)
 
 	uv_close((uv_handle_t *)&handle->quit, NULL);
 	uv_close((uv_handle_t *)&handle->flush, NULL);
-	osc_stream_free(handle->data.stream);
+	uv_close((uv_handle_t *)&handle->wake, NULL);
+	if(handle->data.stream)
+		osc_stream_free(handle->data.stream);
 }
 
 // non-rt
@@ -546,7 +549,61 @@ _flush(uv_async_t *quit)
 	plughandle_t *handle = quit->data;
 
 	// flush sending queue
-	osc_stream_flush(handle->data.stream);
+	if(handle->data.stream)
+		osc_stream_flush(handle->data.stream);
+}
+
+// non-rt
+static void
+_wake(uv_async_t *wake)
+{
+	plughandle_t *handle = wake->data;
+
+	const char *url;
+	size_t size;
+	int changed = 0;
+
+	while((url = varchunk_read_request(handle->state_to_worker, &size)))
+	{
+		printf("state_to_worker: %s\n", url);
+		strcpy(handle->osc_url, url);
+		changed |= 1;
+
+		varchunk_read_advance(handle->state_to_worker);
+	}
+	while((url = varchunk_read_request(handle->ui_to_worker, &size)))
+	{
+		printf("ui_to_worker: %s\n", url);
+		if(strcmp(url, "?"))
+			strcpy(handle->osc_url, url);
+		changed |= 2;
+
+		varchunk_read_advance(handle->ui_to_worker);
+	}
+
+	if(changed)
+	{
+		printf("new url: %s\n", handle->osc_url);
+		if(handle->data.stream)
+			osc_stream_free(handle->data.stream);
+
+		//TODO empty varchunks buffers?
+
+		handle->data.stream = osc_stream_new(&handle->loop, handle->osc_url,
+			&handle->data.driver, handle);
+
+		if(changed & 1) // only update UI when changed by state iface
+		{
+			char *url;
+			size_t size = strlen(handle->osc_url) + 1;
+			if((url = varchunk_write_request(handle->from_worker, size)))
+			{
+				strcpy(url, handle->osc_url);
+
+				varchunk_write_advance(handle->from_worker, size);
+			}
+		}
+	}
 }
 
 // non-rt
@@ -598,6 +655,9 @@ activate(LV2_Handle instance)
 	
 	handle->flush.data = handle;
 	uv_async_init(&handle->loop, &handle->flush, _flush);
+	
+	handle->wake.data = handle;
+	uv_async_init(&handle->loop, &handle->wake, _wake);
 
 	handle->data.stream = osc_stream_new(&handle->loop, handle->osc_url,
 		&handle->data.driver, handle);
@@ -681,23 +741,26 @@ run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 	
-	// write outgoing data
-	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_sink, ev)
-	{
-		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
-		osc_atom_unpack(&handle->oforge, obj, _recv, handle);
-	}
-	if(handle->osc_sink->atom.size > sizeof(LV2_Atom_Sequence_Body))
-		uv_async_send(&handle->flush);
-
-	// read incoming data
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
-	uint32_t capacity = handle->osc_source->atom.size;
+	uint32_t capacity;
 
-	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->osc_source, capacity);
+	// write outgoing data
+	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
+	{
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+
+		osc_atom_unpack(&handle->oforge, obj, _recv, handle);
+	}
+	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
+		uv_async_send(&handle->flush); //TODO or send after each unpack?
+
+	// prepare sequence
+	capacity = handle->osc_out->atom.size;
+	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->osc_out, capacity);
 	lv2_atom_forge_sequence_head(forge, &frame, 0);
 
+	// read incoming data
 	const void *ptr;
 	size_t size;
 	while((ptr = varchunk_read_request(handle->data.from_worker, &size)))
@@ -706,6 +769,47 @@ run(LV2_Handle instance, uint32_t nsamples)
 			(osc_unroll_inject_t *)&inject, handle);
 
 		varchunk_read_advance(handle->data.from_worker);
+	}
+	lv2_atom_forge_pop(forge, &frame);
+
+	// read control port
+	LV2_ATOM_SEQUENCE_FOREACH(handle->control, ev)
+	{
+		const eteroj_event_t *et = (const eteroj_event_t *)&ev->body;
+
+		if(  (et->obj.atom.type == forge->Object)
+			&& (et->obj.body.id == handle->uris.eteroj_event)
+			&& (et->obj.body.otype == handle->uris.eteroj_url) )
+		{
+			char *url;
+			if((url = varchunk_write_request(handle->ui_to_worker, et->prop.value.size)))
+			{
+				strcpy(url, et->url);
+
+				varchunk_write_advance(handle->ui_to_worker, et->prop.value.size);
+				uv_async_send(&handle->wake);
+			}
+		}
+	}
+
+	// prepare sequence
+	capacity = handle->notify->atom.size;
+	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->notify, capacity);
+	lv2_atom_forge_sequence_head(forge, &frame, 0);
+	const char *url;
+	while((url = varchunk_read_request(handle->from_worker, &size)))
+	{
+		printf("notify UI: %zu\n", size);
+
+		LV2_Atom_Forge_Frame obj_frame;
+
+		lv2_atom_forge_frame_time(forge, 0);
+		lv2_atom_forge_object(forge, &obj_frame, handle->uris.eteroj_event, handle->uris.eteroj_url);
+		lv2_atom_forge_key(forge, handle->uris.eteroj_url);
+		lv2_atom_forge_string(forge, url, size);
+		lv2_atom_forge_pop(forge, &obj_frame);
+
+		varchunk_read_advance(handle->from_worker);
 	}
 	lv2_atom_forge_pop(forge, &frame);
 }
@@ -727,6 +831,9 @@ cleanup(LV2_Handle instance)
 
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
+	varchunk_free(handle->ui_to_worker);
+	varchunk_free(handle->state_to_worker);
+	varchunk_free(handle->from_worker);
 	free(handle);
 }
 

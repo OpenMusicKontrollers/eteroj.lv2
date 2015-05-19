@@ -32,11 +32,10 @@
 
 #define ETEROJ_URI										"http://open-music-kontrollers.ch/lv2/eteroj"
 
-// state keys
 #define ETEROJ_TRIG_URI								ETEROJ_URI"#trig"
 #define ETEROJ_DIRTY_URI							ETEROJ_URI"#dirty"
 
-// worker keys
+#define ETEROJ_EVENT_URI							ETEROJ_URI"#event"
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"
 
 // plugin uris
@@ -53,5 +52,15 @@ extern const LV2UI_Descriptor eteroj_io_eo;
 extern const LV2UI_Descriptor eteroj_io_ui;
 extern const LV2UI_Descriptor eteroj_io_kx;
 extern const LV2UI_Descriptor eteroj_io_x11;
+
+#define _ATOM_ALIGNED __attribute__((aligned(8)))
+
+typedef struct _eteroj_event_t eteroj_event_t;
+
+struct _eteroj_event_t {
+	LV2_Atom_Object obj _ATOM_ALIGNED;
+	LV2_Atom_Property_Body prop _ATOM_ALIGNED;
+		char url [0] _ATOM_ALIGNED;
+} _ATOM_ALIGNED;
 
 #endif // _ETEROJ_LV2_H
