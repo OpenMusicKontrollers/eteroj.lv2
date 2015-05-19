@@ -1,0 +1,12 @@
+[submodule "libosc"]
+	path = libosc
+	url = https://github.com/OpenMusicKontrollers/libosc.git
+[submodule "libosc_stream"]
+	path = libosc_stream
+	url = https://github.com/OpenMusicKontrollers/libosc_stream.git
+[submodule "eo_ui.lv2"]
+	path = eo_ui.lv2
+	url = https://github.com/OpenMusicKontrollers/eo_ui.lv2.git
+[submodule "varchunk"]
+	path = varchunk
+	url = https://github.com/OpenMusicKontrollers/varchunk.git

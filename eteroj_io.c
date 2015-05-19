@@ -23,7 +23,7 @@
 #include <osc.h>
 #include <osc_stream.h>
 
-#include <osc_io.h>
+#include <eteroj.h>
 #include <varchunk.h>
 #include <lv2_osc.h>
 
@@ -49,9 +49,9 @@ struct _plughandle_t {
 	struct {
 		LV2_URID osc_event;
 		LV2_URID state_default;
-		LV2_URID osc_io_url;
-		LV2_URID osc_io_trig;
-		LV2_URID osc_io_dirty;
+		LV2_URID eteroj_url;
+		LV2_URID eteroj_trig;
+		LV2_URID eteroj_dirty;
 		
 		LV2_URID log_note;
 		LV2_URID log_error;
@@ -121,7 +121,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 
 	return store(
 		state,
-		handle->uris.osc_io_url,
+		handle->uris.eteroj_url,
 		handle->osc_url,
 		strlen(handle->osc_url) + 1,
 		handle->forge.String,
@@ -140,7 +140,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 	uint32_t flags2;
 	const char *osc_url = retrieve(
 		state,
-		handle->uris.osc_io_url,
+		handle->uris.eteroj_url,
 		&size,
 		&type,
 		&flags2
@@ -467,12 +467,12 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		LV2_OSC__OscEvent);
 	handle->uris.state_default = handle->map->map(handle->map->handle,
 		LV2_STATE__loadDefaultState);
-	handle->uris.osc_io_url = handle->map->map(handle->map->handle,
-		OSC_IO_URL_URI);
-	handle->uris.osc_io_trig = handle->map->map(handle->map->handle,
-		OSC_IO_TRIG_URI);
-	handle->uris.osc_io_dirty = handle->map->map(handle->map->handle,
-		OSC_IO_DIRTY_URI);
+	handle->uris.eteroj_url = handle->map->map(handle->map->handle,
+		ETEROJ_URL_URI);
+	handle->uris.eteroj_trig = handle->map->map(handle->map->handle,
+		ETEROJ_TRIG_URI);
+	handle->uris.eteroj_dirty = handle->map->map(handle->map->handle,
+		ETEROJ_DIRTY_URI);
 	handle->uris.log_note = handle->map->map(handle->map->handle,
 		LV2_LOG__Note);
 	handle->uris.log_error = handle->map->map(handle->map->handle,
@@ -739,8 +739,8 @@ extension_data(const char* uri)
 	return NULL;
 }
 
-const LV2_Descriptor osc_io_io = {
-	.URI						= OSC_IO_IO_URI,
+const LV2_Descriptor eteroj_io = {
+	.URI						= ETEROJ_IO_URI,
 	.instantiate		= instantiate,
 	.connect_port		= connect_port,
 	.activate				= activate,

@@ -17,13 +17,19 @@
 
 #include <eteroj.h>
 
-LV2_SYMBOL_EXPORT const LV2_Descriptor*
-lv2_descriptor(uint32_t index)
+LV2_SYMBOL_EXPORT const LV2UI_Descriptor*
+lv2ui_descriptor(uint32_t index)
 {
 	switch(index)
 	{
 		case 0:
-			return &eteroj_io;
+			return &eteroj_io_eo;
+		case 1:
+			return &eteroj_io_ui;
+		case 2:
+			return &eteroj_io_x11;
+		case 3:
+			return &eteroj_io_kx;
 		default:
 			return NULL;
 	}

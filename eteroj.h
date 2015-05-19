@@ -15,8 +15,8 @@
  * http://www.perlfoundation.org/artistic_license_2_0.
  */
 
-#ifndef _OSC_IO_LV2_H
-#define _OSC_IO_LV2_H
+#ifndef _ETEROJ_LV2_H
+#define _ETEROJ_LV2_H
 
 #include <stdint.h>
 
@@ -30,18 +30,28 @@
 #include "lv2/lv2plug.in/ns/extensions/ui/ui.h"
 #include "lv2/lv2plug.in/ns/lv2core/lv2.h"
 
-#define OSC_IO_URI										"http://open-music-kontrollers.ch/lv2/osc_io"
+#define ETEROJ_URI										"http://open-music-kontrollers.ch/lv2/eteroj"
 
 // state keys
-#define OSC_IO_TRIG_URI								OSC_IO_URI"#trig"
-#define OSC_IO_DIRTY_URI							OSC_IO_URI"#dirty"
+#define ETEROJ_TRIG_URI								ETEROJ_URI"#trig"
+#define ETEROJ_DIRTY_URI							ETEROJ_URI"#dirty"
 
 // worker keys
-#define OSC_IO_URL_URI								OSC_IO_URI"#url"
+#define ETEROJ_URL_URI								ETEROJ_URI"#url"
 
 // plugin uris
-#define OSC_IO_IO_URI									OSC_IO_URI"#io"
+#define ETEROJ_IO_URI									ETEROJ_URI"#io"
 
-extern const LV2_Descriptor osc_io_io;
+#define ETEROJ_IO_EO_URI							ETEROJ_URI"#io_eo"
+#define ETEROJ_IO_UI_URI							ETEROJ_URI"#io_ui"
+#define ETEROJ_IO_KX_URI							ETEROJ_URI"#io_kx"
+#define ETEROJ_IO_X11_URI							ETEROJ_URI"#io_x11"
 
-#endif // _OSC_IO_LV2_H
+extern const LV2_Descriptor eteroj_io;
+
+extern const LV2UI_Descriptor eteroj_io_eo;
+extern const LV2UI_Descriptor eteroj_io_ui;
+extern const LV2UI_Descriptor eteroj_io_kx;
+extern const LV2UI_Descriptor eteroj_io_x11;
+
+#endif // _ETEROJ_LV2_H

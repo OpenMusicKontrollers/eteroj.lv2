@@ -19,9 +19,7 @@
 @prefix ui:       <http://lv2plug.in/ns/extensions/ui#> .
 @prefix kx:				<http://kxstudio.sf.net/ns/lv2ext/external-ui#> .
 
-@prefix rtmidi:	  <http://open-music-kontrollers.ch/lv2/rtmidi#> .
-@prefix osc_io:	  <http://open-music-kontrollers.ch/lv2/osc_io#> .
-@prefix synthpod: <http://open-music-kontrollers.ch/lv2/synthpod#> .
+@prefix eteroj:		<http://open-music-kontrollers.ch/lv2/eteroj#> .
 
 # to please sord_validate
 ui:EoUI
@@ -33,85 +31,29 @@ kx:Widget
 kx:Host
 	a lv2:Feature .
 
-# RtMidi
-rtmidi:out
+# Eteroj IO 
+eteroj:io
 	a lv2:Plugin ;
-	lv2:binary <rtmidi@LIB_EXT@> ;
-	rdfs:seeAlso <rtmidi.ttl> .
+	lv2:binary <eteroj@LIB_EXT@> ;
+	@EO_UI_WRAP@ui:ui eteroj:io_eo ;
+	@UI_UI_WRAP@ui:ui eteroj:io_ui ;
+	@KX_UI_WRAP@ui:ui eteroj:io_kx ;
+	@X11_UI_WRAP@ui:ui eteroj:io_x11 ;
+	rdfs:seeAlso <eteroj.ttl> .
 
-rtmidi:in
-	a lv2:Plugin ;
-	lv2:binary <rtmidi@LIB_EXT@> ;
-	rdfs:seeAlso <rtmidi.ttl> .
-
-# OSC
-osc_io:io
-	a lv2:Plugin ;
-	lv2:binary <osc_io@LIB_EXT@> ;
-	rdfs:seeAlso <osc_io.ttl> .
-
-# Synthpod Source
-synthpod:source
-	a lv2:Plugin ;
-	lv2:binary <synthpod@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-
-# Synthpod Sink
-synthpod:sink
-	a lv2:Plugin ;
-	lv2:binary <synthpod@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-
-# Synthpod Stereo
-synthpod:stereo
-	a lv2:Plugin ;
-	lv2:binary <synthpod@LIB_EXT@> ;
-	#@EO_UI_WRAP@ui:ui synthpod:common_eo ;
-	@UI_UI_WRAP@ui:ui synthpod:common_ui ;
-	@KX_UI_WRAP@ui:ui synthpod:common_kx ;
-	#@X11_UI_WRAP@ui:ui synthpod:common_x11 ;
-	rdfs:seeAlso <synthpod.ttl> .
-
-synthpod:common_eo
+eteroj:io_eo
 	a ui:EoUI ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-synthpod:common_ui
+	ui:binary <eteroj_ui@LIB_EXT@> ;
+	rdfs:seeAlso <eteroj.ttl> .
+eteroj:io_ui
 	a ui:UI ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-synthpod:common_kx
+	ui:binary <eteroj_ui@LIB_EXT@> ;
+	rdfs:seeAlso <eteroj.ttl> .
+eteroj:io_kx
 	a kx:Widget ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-synthpod:common_x11
+	ui:binary <eteroj_ui@LIB_EXT@> ;
+	rdfs:seeAlso <eteroj.ttl> .
+eteroj:io_x11
 	a ui:X11UI ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-
-# Synthpod Keyboard
-synthpod:keyboard
-	a lv2:Plugin ;
-	lv2:binary <synthpod@LIB_EXT@> ;
-	@EO_UI_WRAP@ui:ui synthpod:keyboard_eo ;
-	@UI_UI_WRAP@ui:ui synthpod:keyboard_ui ;
-	@KX_UI_WRAP@ui:ui synthpod:keyboard_kx ;
-	@X11_UI_WRAP@ui:ui synthpod:keyboard_x11 ;
-	rdfs:seeAlso <synthpod.ttl> .
-
-synthpod:keyboard_eo
-	a ui:EoUI ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-synthpod:keyboard_ui
-	a ui:UI ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-synthpod:keyboard_kx
-	a kx:Widget ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
-synthpod:keyboard_x11
-	a ui:X11UI ;
-	ui:binary <synthpod_ui@LIB_EXT@> ;
-	rdfs:seeAlso <synthpod.ttl> .
+	ui:binary <eteroj_ui@LIB_EXT@> ;
+	rdfs:seeAlso <eteroj.ttl> .
