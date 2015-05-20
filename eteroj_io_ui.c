@@ -124,6 +124,97 @@ _url_update(plughandle_t *handle)
 }
 
 static void
+_ui_update(plughandle_t *handle, const char *addr)
+{
+	if(!strncmp(addr, "osc.udp", 7))
+	{
+		addr += 7;
+
+		handle->socket = ETEROJ_SOCKET_UDP;
+
+		if(!strncmp(addr, "://", 3))
+		{
+			handle->version = ETEROJ_VERSION_4;
+			addr += 3;
+		}
+		else if(!strncmp(addr, "4://", 4))
+		{
+			handle->version = ETEROJ_VERSION_4;
+			addr += 4;
+		}
+		else if(!strncmp(addr, "6://", 4))
+		{
+			handle->version = ETEROJ_VERSION_6;
+			addr += 4;
+		}
+
+		strcpy(handle->net_address, addr);
+	}
+	else if(!strncmp(addr, "osc.tcp", 7))
+	{
+		addr += 7;
+		
+		handle->socket = ETEROJ_SOCKET_TCP;
+
+		if(!strncmp(addr, "://", 3))
+		{
+			handle->version = ETEROJ_VERSION_4;
+			addr += 3;
+		}
+		else if(!strncmp(addr, "4://", 4))
+		{
+			handle->version = ETEROJ_VERSION_4;
+			addr += 4;
+		}
+		else if(!strncmp(addr, "6://", 4))
+		{
+			handle->version = ETEROJ_VERSION_6;
+			addr += 4;
+		}
+
+		strcpy(handle->net_address, addr);
+	}
+	else if(!strncmp(addr, "osc.slip.tcp", 12))
+	{
+		addr += 12;
+	
+		handle->socket = ETEROJ_SOCKET_TCP_SLIP;
+
+		if(!strncmp(addr, "://", 3))
+		{
+			handle->version = ETEROJ_VERSION_4;
+			addr += 3;
+		}
+		else if(!strncmp(addr, "4://", 4))
+		{
+			handle->version = ETEROJ_VERSION_4;
+			addr += 4;
+		}
+		else if(!strncmp(addr, "6://", 4))
+		{
+			handle->version = ETEROJ_VERSION_6;
+			addr += 4;
+		}
+
+		strcpy(handle->net_address, addr);
+	}
+	else if(!strncmp(addr, "osc.pipe://", 11))
+	{
+		handle->socket = ETEROJ_SOCKET_PIPE;
+		addr += 11;
+
+		strcpy(handle->dev_address, addr);
+	}
+
+	if(handle->socket == ETEROJ_SOCKET_PIPE)
+		elm_entry_entry_set(handle->entry, handle->dev_address);
+	else
+		elm_entry_entry_set(handle->entry, handle->net_address);
+
+	_url_update(handle);
+}
+
+static void
 _sock_changed(void *data, Evas_Object *obj, void *event_info)
 {
 	plughandle_t *handle = data;
@@ -561,7 +652,7 @@ port_event(LV2UI_Handle instance, uint32_t port_index, uint32_t size,
 			&& (et->obj.body.otype == handle->uri.eteroj_url) )
 		{
 			printf("notify: %s\n", et->url);
-			//TODO
+			_ui_update(handle, et->url);
 		}
 	}
 }

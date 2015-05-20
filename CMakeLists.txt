@@ -28,13 +28,7 @@ set(LIBS ${LIBS} ${UV_LDFLAGS})
 # eteroj
 add_library(eteroj MODULE
 	eteroj.c
-	eteroj_io.c
-	libosc/osc.c
-	libosc_stream/osc_stream.c
-	libosc_stream/osc_stream_udp.c
-	libosc_stream/osc_stream_tcp.c
-	libosc_stream/osc_stream_pipe.c
-	varchunk/varchunk.c)
+	eteroj_io.c)
 target_link_libraries(eteroj ${LIBS})
 if(WIN32)
 	target_link_libraries(eteroj "-lws2_32")

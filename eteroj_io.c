@@ -235,7 +235,7 @@ _bundle_out(osc_time_t timestamp, void *data)
 
 static int
 _resolve(osc_time_t timestamp, const char *path, const char *fmt,
-	osc_data_t *buf, size_t size, void *data)
+	const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 
@@ -247,7 +247,7 @@ _resolve(osc_time_t timestamp, const char *path, const char *fmt,
 
 static int
 _timeout(osc_time_t timestamp, const char *path, const char *fmt,
-	osc_data_t *buf, size_t size, void *data)
+	const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 
@@ -258,8 +258,30 @@ _timeout(osc_time_t timestamp, const char *path, const char *fmt,
 }
 
 static int
+_error(osc_time_t timestamp, const char *path, const char *fmt,
+	const osc_data_t *buf, size_t size, void *data)
+{
+	plughandle_t *handle = data;
+
+	const char *where;
+	const char *what;
+
+	const osc_data_t *ptr = buf;
+	ptr = osc_get_string(ptr, &where);
+	ptr = osc_get_string(ptr, &what);
+
+	printf("_error: %s (%s)\n", where, what);
+
+
+	//TODO
+	*handle->state = STATE_TIMEDOUT;
+
+	return 1;
+}
+
+static int
 _connect(osc_time_t timestamp, const char *path, const char *fmt,
-	osc_data_t *buf, size_t size, void *data)
+	const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 
@@ -271,7 +293,7 @@ _connect(osc_time_t timestamp, const char *path, const char *fmt,
 
 static int
 _disconnect(osc_time_t timestamp, const char *path, const char *fmt,
-	osc_data_t *buf, size_t size, void *data)
+	const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 
@@ -283,14 +305,14 @@ _disconnect(osc_time_t timestamp, const char *path, const char *fmt,
 
 static int
 _message(osc_time_t timestamp, const char *path, const char *fmt,
-	osc_data_t *buf, size_t size, void *data)
+	const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame obj_frame;
 	LV2_Atom_Forge_Frame tup_frame;
 
-	osc_data_t *ptr = buf;
+	const osc_data_t *ptr = buf;
 
 	lv2_atom_forge_frame_time(forge, 0); //TODO
 	osc_forge_message_push(&handle->oforge, forge, &obj_frame, &tup_frame,
@@ -381,7 +403,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			}
 			case 'm':
 			{
-				uint8_t *m;
+				const uint8_t *m;
 				ptr = osc_get_midi(ptr, &m);
 				osc_forge_midi(&handle->oforge, forge, m);
 				break;
@@ -396,6 +418,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 static const osc_method_t methods [] = {
 	{"/stream/resolve", "", _resolve},
 	{"/stream/timeout", "", _timeout},
+	{"/stream/error", "ss", _error},
 	{"/stream/connect", "", _connect},
 	{"/stream/disconnect", "", _disconnect},
 	{NULL, NULL, _message},
@@ -412,23 +435,23 @@ _unroll_stamp(osc_time_t tstmp, void *data)
 }
 
 static void
-_unroll_message(osc_data_t *buf, size_t size, void *data)
+_unroll_message(const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	osc_dispatch_method(OSC_IMMEDIATE, buf, size, (osc_method_t *)methods,
+	osc_dispatch_method(OSC_IMMEDIATE, buf, size, methods,
 		NULL, NULL, handle);
 }
 
 static void
-_unroll_bundle(osc_data_t *buf, size_t size, void *data)
+_unroll_bundle(const osc_data_t *buf, size_t size, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
 	lv2_atom_forge_frame_time(forge, 0); //TODO
-	osc_dispatch_method(OSC_IMMEDIATE, buf, size, (osc_method_t *)methods,
+	osc_dispatch_method(OSC_IMMEDIATE, buf, size, methods,
 		_bundle_in, _bundle_out, handle);
 }
 
@@ -678,7 +701,7 @@ _recv(uint64_t timestamp, const char *path, const char *fmt,
 	if((buf = varchunk_write_request(handle->data.to_worker, reserve)))
 	{
 		osc_data_t *ptr = buf;
-		osc_data_t *end = buf + reserve;
+		const osc_data_t *end = buf + reserve;
 
 		ptr = osc_set_path(ptr, end, path);
 		ptr = osc_set_fmt(ptr, end, fmt);
@@ -761,12 +784,12 @@ run(LV2_Handle instance, uint32_t nsamples)
 	lv2_atom_forge_sequence_head(forge, &frame, 0);
 
 	// read incoming data
-	const void *ptr;
+	const osc_data_t *ptr;
 	size_t size;
 	while((ptr = varchunk_read_request(handle->data.from_worker, &size)))
 	{
 		osc_unroll_packet((osc_data_t *)ptr, size, OSC_UNROLL_MODE_PARTIAL,
-			(osc_unroll_inject_t *)&inject, handle);
+			&inject, handle);
 
 		varchunk_read_advance(handle->data.from_worker);
 	}
