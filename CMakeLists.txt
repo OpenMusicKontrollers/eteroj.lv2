@@ -43,9 +43,11 @@ set(LIBS_UI ${LIBS_UI} ${ELM_LDFLAGS})
 
 pkg_search_module(ECORE_X OPTIONAL ecore-x)
 
-if(${ECORE_X_FOUND} AND ((${ELM_VERSION} VERSION_EQUAL "1.13.0") OR (${ELM_VERSION} VERSION_GREATER "1.13.0")))
+if((DEFINED ECORE_X_FOUND) AND ((${ELM_VERSION} VERSION_EQUAL "1.13.0") OR (${ELM_VERSION} VERSION_GREATER "1.13.0")))
+	message(STATUS "X11 UI wrap enabled")
 	set(X11_UI_WRAP "")
 	add_definitions("-DX11_UI_WRAP")
+	message(STATUS "X11 UI wrap disabled")
 else()
 	set(X11_UI_WRAP "#")
 endif()
