@@ -46,7 +46,6 @@ enum _plugstate_t {
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	struct {
-		LV2_URID osc_event;
 		LV2_URID state_default;
 		LV2_URID eteroj_event;
 		LV2_URID eteroj_url;
@@ -84,8 +83,7 @@ struct _plughandle_t {
 		osc_stream_t *stream;
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
-		LV2_Atom_Forge_Frame obj_frame;
-		LV2_Atom_Forge_Frame tup_frame;
+		LV2_Atom_Forge_Frame frame [2];
 	} data;
 };
 
@@ -216,10 +214,8 @@ _bundle_in(osc_time_t timestamp, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
-	LV2_Atom_Forge_Frame *obj_frame = &handle->data.obj_frame;
-	LV2_Atom_Forge_Frame *tup_frame = &handle->data.tup_frame;
 
-	osc_forge_bundle_push(&handle->oforge, forge, obj_frame, tup_frame, timestamp);
+	osc_forge_bundle_push(&handle->oforge, forge, handle->data.frame, timestamp);
 }
 
 static void
@@ -227,10 +223,8 @@ _bundle_out(osc_time_t timestamp, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
-	LV2_Atom_Forge_Frame *obj_frame = &handle->data.obj_frame;
-	LV2_Atom_Forge_Frame *tup_frame = &handle->data.tup_frame;
 	
-	osc_forge_bundle_pop(&handle->oforge, forge, obj_frame, tup_frame);
+	osc_forge_bundle_pop(&handle->oforge, forge, handle->data.frame);
 }
 
 static int
@@ -309,14 +303,12 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
-	LV2_Atom_Forge_Frame obj_frame;
-	LV2_Atom_Forge_Frame tup_frame;
+	LV2_Atom_Forge_Frame frame [2];
 
 	const osc_data_t *ptr = buf;
 
 	lv2_atom_forge_frame_time(forge, 0); //TODO
-	osc_forge_message_push(&handle->oforge, forge, &obj_frame, &tup_frame,
-		path, fmt);
+	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
 	for(const char *type = fmt; *type; type++)
 		switch(*type)
@@ -410,7 +402,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			}
 		}
 
-	osc_forge_message_pop(&handle->oforge, forge, &obj_frame, &tup_frame);
+	osc_forge_message_pop(&handle->oforge, forge, frame);
 
 	return 1;
 }
@@ -484,8 +476,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 	
-	handle->uris.osc_event = handle->map->map(handle->map->handle,
-		LV2_OSC__OscEvent);
 	handle->uris.state_default = handle->map->map(handle->map->handle,
 		LV2_STATE__loadDefaultState);
 	handle->uris.eteroj_event = handle->map->map(handle->map->handle,
@@ -773,7 +763,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		osc_atom_unpack(&handle->oforge, obj, _recv, handle);
+		osc_atom_event_unroll(&handle->oforge, obj, _recv, handle);
 	}
 	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
 		uv_async_send(&handle->flush); //TODO or send after each unpack?
