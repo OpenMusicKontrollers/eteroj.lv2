@@ -10,6 +10,8 @@ include_directories(${PROJECT_SOURCE_DIR}/eo_ui.lv2)
 include_directories(${PROJECT_SOURCE_DIR}/varchunk)
 include_directories(${PROJECT_BINARY_DIR})
 
+set(CMAKE_C_FALGS "-std=gnu99 ${CMAKE_C_FLAGS}")
+
 set(DEST lib/lv2/eteroj.lv2)
 if(WIN32)
 	set(LIB_EXT ".dll")

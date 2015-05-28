@@ -155,7 +155,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 	char *url;
 	if((url = varchunk_write_request(handle->state_to_worker, size)))
 	{
-		strcpy(url, osc_url);
+		strncpy(url, osc_url, size);
 
 		varchunk_write_advance(handle->state_to_worker, size);
 		uv_async_send(&handle->wake);
@@ -265,7 +265,6 @@ _error(osc_time_t timestamp, const char *path, const char *fmt,
 	ptr = osc_get_string(ptr, &what);
 
 	printf("_error: %s (%s)\n", where, what);
-
 
 	//TODO
 	*handle->state = STATE_TIMEDOUT;
@@ -578,25 +577,26 @@ _wake(uv_async_t *wake)
 
 	while((url = varchunk_read_request(handle->state_to_worker, &size)))
 	{
-		printf("state_to_worker: %s\n", url);
-		strcpy(handle->osc_url, url);
-		changed |= 1;
+		strncpy(handle->osc_url, url, size);
+		changed |= 1; // state change
 
 		varchunk_read_advance(handle->state_to_worker);
 	}
 	while((url = varchunk_read_request(handle->ui_to_worker, &size)))
 	{
-		printf("ui_to_worker: %s\n", url);
 		if(strcmp(url, "?"))
-			strcpy(handle->osc_url, url);
-		changed |= 2;
+		{
+			strncpy(handle->osc_url, url, size);
+			changed |= 2; // ui change
+		}
+		else
+			changed |= 4; // ui query
 
 		varchunk_read_advance(handle->ui_to_worker);
 	}
 
-	if(changed)
+	if(changed & (2 | 1))
 	{
-		printf("new url: %s\n", handle->osc_url);
 		if(handle->data.stream)
 			osc_stream_free(handle->data.stream);
 
@@ -604,17 +604,17 @@ _wake(uv_async_t *wake)
 
 		handle->data.stream = osc_stream_new(&handle->loop, handle->osc_url,
 			&handle->data.driver, handle);
+	}
 
-		if(changed & 1) // only update UI when changed by state iface
+	if(changed & (4 | 1))
+	{
+		char *url;
+		size_t size = strlen(handle->osc_url) + 1;
+		if((url = varchunk_write_request(handle->from_worker, size)))
 		{
-			char *url;
-			size_t size = strlen(handle->osc_url) + 1;
-			if((url = varchunk_write_request(handle->from_worker, size)))
-			{
-				strcpy(url, handle->osc_url);
+			strncpy(url, handle->osc_url, size);
 
-				varchunk_write_advance(handle->from_worker, size);
-			}
+			varchunk_write_advance(handle->from_worker, size);
 		}
 	}
 }
@@ -797,7 +797,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 			char *url;
 			if((url = varchunk_write_request(handle->ui_to_worker, et->prop.value.size)))
 			{
-				strcpy(url, et->url);
+				strncpy(url, et->url, et->prop.value.size);
 
 				varchunk_write_advance(handle->ui_to_worker, et->prop.value.size);
 				uv_async_send(&handle->wake);
@@ -812,8 +812,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 	const char *url;
 	while((url = varchunk_read_request(handle->from_worker, &size)))
 	{
-		printf("notify UI: %zu\n", size);
-
 		LV2_Atom_Forge_Frame obj_frame;
 
 		lv2_atom_forge_frame_time(forge, 0);

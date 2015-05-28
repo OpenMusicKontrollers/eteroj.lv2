@@ -70,14 +70,27 @@ struct _plughandle_t {
 	eteroj_socket_t socket;
 	eteroj_version_t version;
 	eteroj_role_t role;
-	uint16_t port;
+	uint16_t net_port;
 	char net_address [512];
 	char dev_address [512];
 	char url [512];
 
+	Evas_Object *udp;
+	Evas_Object *tcp;
+	Evas_Object *tcp_slip;
+	Evas_Object *pipe;
+
+	Evas_Object *ipv4;
+	Evas_Object *ipv6;
+
+	Evas_Object *server;
+	Evas_Object *client;
+
 	Evas_Object *hbox;
+	Evas_Object *port;
 	Evas_Object *addr;
 	Evas_Object *entry;
+
 	Evas_Object *button;
 };
 
@@ -100,7 +113,7 @@ _url_update(plughandle_t *handle)
 			handle->role == ETEROJ_ROLE_SERVER
 				? ""
 				: handle->net_address,
-			handle->port);
+			handle->net_port);
 	}
 
 	elm_object_text_set(handle->button, handle->url);
@@ -147,8 +160,6 @@ _ui_update(plughandle_t *handle, const char *addr)
 			handle->version = ETEROJ_VERSION_6;
 			addr += 4;
 		}
-
-		strcpy(handle->net_address, addr);
 	}
 	else if(!strncmp(addr, "osc.tcp", 7))
 	{
@@ -171,8 +182,6 @@ _ui_update(plughandle_t *handle, const char *addr)
 			handle->version = ETEROJ_VERSION_6;
 			addr += 4;
 		}
-
-		strcpy(handle->net_address, addr);
 	}
 	else if(!strncmp(addr, "osc.slip.tcp", 12))
 	{
@@ -195,8 +204,6 @@ _ui_update(plughandle_t *handle, const char *addr)
 			handle->version = ETEROJ_VERSION_6;
 			addr += 4;
 		}
-
-		strcpy(handle->net_address, addr);
 	}
 	else if(!strncmp(addr, "osc.pipe://", 11))
 	{
@@ -207,9 +214,32 @@ _ui_update(plughandle_t *handle, const char *addr)
 	}
 
 	if(handle->socket == ETEROJ_SOCKET_PIPE)
+	{
 		elm_entry_entry_set(handle->entry, handle->dev_address);
+	}
 	else
+	{
+		const char *port = strchr(addr, ':');
+		if(port == addr)
+		{
+			handle->role = ETEROJ_ROLE_SERVER;
+		}
+		else
+		{
+			handle->role = ETEROJ_ROLE_CLIENT;
+			strncpy(handle->net_address, addr, port - addr);
+		}
+
+		port += 1;
+		sscanf(port, "%hu", &handle->net_port);
+
+		elm_entry_entry_set(handle->port, port);
 		elm_entry_entry_set(handle->entry, handle->net_address);
+	}
+
+	elm_radio_value_set(handle->udp, handle->socket);
+	elm_radio_value_set(handle->ipv4, handle->version);
+	elm_radio_value_set(handle->server, handle->role);
 
 	_url_update(handle);
 }
@@ -256,7 +286,7 @@ _port_changed(void *data, Evas_Object *obj, void *event_info)
 
 	const char *port = elm_entry_entry_get(obj);
 
-	if(sscanf(port, "%hu", &handle->port) == 1)
+	if(sscanf(port, "%hu", &handle->net_port) == 1)
 		evas_object_color_set(obj, 0xff, 0xff, 0xff, 0xff);
 	else
 		evas_object_color_set(obj, 0xff, 0x00, 0x00, 0xff);
@@ -346,6 +376,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(udp, "changed", _sock_changed, handle);
 		evas_object_show(udp);
 		elm_box_pack_end(box, udp);
+		handle->udp = udp;
 
 		Evas_Object *tcp = elm_radio_add(box);
 		elm_radio_state_value_set(tcp, ETEROJ_SOCKET_TCP);
@@ -355,6 +386,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(tcp, "changed", _sock_changed, handle);
 		evas_object_show(tcp);
 		elm_box_pack_end(box, tcp);
+		handle->tcp = tcp;
 
 		Evas_Object *tcp_slip = elm_radio_add(box);
 		elm_radio_state_value_set(tcp_slip, ETEROJ_SOCKET_TCP_SLIP);
@@ -364,6 +396,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(tcp_slip, "changed", _sock_changed, handle);
 		evas_object_show(tcp_slip);
 		elm_box_pack_end(box, tcp_slip);
+		handle->tcp_slip = tcp_slip;
 
 		Evas_Object *pipe = elm_radio_add(box);
 		elm_radio_state_value_set(pipe, ETEROJ_SOCKET_PIPE);
@@ -373,6 +406,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(pipe, "changed", _sock_changed, handle);
 		evas_object_show(pipe);
 		elm_box_pack_end(box, pipe);
+		handle->pipe = pipe;
 	}
 
 	Evas_Object *hbox = elm_box_add(vbox);
@@ -408,6 +442,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(ipv4, "changed", _version_changed, handle);
 		evas_object_show(ipv4);
 		elm_box_pack_end(box, ipv4);
+		handle->ipv4 = ipv4;
 
 		Evas_Object *ipv6 = elm_radio_add(box);
 		elm_radio_state_value_set(ipv6, ETEROJ_VERSION_6);
@@ -417,6 +452,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(ipv6, "changed", _version_changed, handle);
 		evas_object_show(ipv6);
 		elm_box_pack_end(box, ipv6);
+		handle->ipv6 = ipv6;
 	}
 
 	Evas_Object *role = elm_frame_add(hbox);
@@ -442,6 +478,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(server, "changed", _role_changed, handle);
 		evas_object_show(server);
 		elm_box_pack_end(box, server);
+		handle->server = server;
 
 		Evas_Object *client = elm_radio_add(box);
 		elm_radio_state_value_set(client, ETEROJ_ROLE_CLIENT);
@@ -451,6 +488,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(client, "changed", _role_changed, handle);
 		evas_object_show(client);
 		elm_box_pack_end(box, client);
+		handle->client = client;
 	}
 
 	Evas_Object *port = elm_frame_add(hbox);
@@ -470,7 +508,7 @@ _content_get(eo_ui_t *eoui)
 		elm_object_content_set(port, box);
 
 		char buf [16];
-		sprintf(buf, "%hu", handle->port);
+		sprintf(buf, "%hu", handle->net_port);
 
 		Evas_Object *entry = elm_entry_add(box);
 		elm_entry_entry_set(entry, buf);
@@ -482,6 +520,7 @@ _content_get(eo_ui_t *eoui)
 		evas_object_smart_callback_add(entry, "changed", _port_changed, handle);
 		evas_object_show(entry);
 		elm_box_pack_end(box, entry);
+		handle->port = entry;
 	}
 
 	Evas_Object *addr = elm_frame_add(vbox);
@@ -554,7 +593,7 @@ instantiate(const LV2UI_Descriptor *descriptor, const char *plugin_uri,
 
 	strcpy(handle->net_address, "localhost");
 	strcpy(handle->dev_address, "/dev/ttyACM0");
-	handle->port = 9090;
+	handle->net_port = 9090;
 
 	eo_ui_t *eoui = &handle->eoui;
 	eoui->driver = driver;
@@ -642,7 +681,7 @@ port_event(LV2UI_Handle instance, uint32_t port_index, uint32_t size,
 	uint32_t format, const void *buffer)
 {
 	plughandle_t *handle = instance;
-			
+
 	if(port_index == handle->notify_port)
 	{
 		const eteroj_event_t *et = (const eteroj_event_t *)buffer;
@@ -651,7 +690,6 @@ port_event(LV2UI_Handle instance, uint32_t port_index, uint32_t size,
 			&& (et->obj.body.id == handle->uri.eteroj_event)
 			&& (et->obj.body.otype == handle->uri.eteroj_url) )
 		{
-			printf("notify: %s\n", et->url);
 			_ui_update(handle, et->url);
 		}
 	}
