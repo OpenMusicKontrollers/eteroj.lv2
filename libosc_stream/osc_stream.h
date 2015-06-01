@@ -39,11 +39,14 @@ typedef void (*osc_stream_recv_adv_t)(size_t written, void *data);
 typedef const void *(*osc_stream_send_req_t)(size_t *len, void *data);
 typedef void (*osc_stream_send_adv_t)(void *data);
 
+typedef void (*osc_stream_free_t)(void *data);
+
 struct _osc_stream_driver_t {
 	osc_stream_recv_req_t recv_req;
 	osc_stream_recv_adv_t recv_adv;
 	osc_stream_send_req_t send_req;
 	osc_stream_send_adv_t send_adv;
+	osc_stream_free_t free;
 };
 
 static inline osc_stream_t *
@@ -596,6 +599,7 @@ _udp_close_cb(uv_handle_t *handle)
 	osc_stream_udp_t *udp = (void *)socket - offsetof(osc_stream_udp_t, socket);
 	osc_stream_t *stream = (void *)udp - offsetof(osc_stream_t, udp);
 
+	stream->driver->free(stream->data);
 	free(stream);
 }
 
@@ -1079,7 +1083,10 @@ _tcp_close_client_cb(uv_handle_t *handle)
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
 
 	if(!tcp->server) // is client
+	{
+		stream->driver->free(stream->data);
 		free(stream);
+	}
 }
 
 static inline void
@@ -1089,6 +1096,7 @@ _tcp_close_server_cb(uv_handle_t *handle)
 	osc_stream_tcp_t *tcp = (void *)socket - offsetof(osc_stream_tcp_t, socket);
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
 
+	stream->driver->free(stream->data);
 	free(stream);
 }
 
@@ -1122,7 +1130,10 @@ _tcp_free(osc_stream_t *stream)
 		if(uv_is_active((uv_handle_t *)&tcp->socket))
 			uv_close((uv_handle_t *)&tcp->socket, _tcp_close_server_cb);
 		else
+		{
+			stream->driver->free(stream->data);
 			free(stream);
+		}
 	}
 	else
 	{
@@ -1130,7 +1141,10 @@ _tcp_free(osc_stream_t *stream)
 			uv_cancel((uv_req_t *)&tcp->conn);
 
 		if(!tcp->connected)
+		{
+			stream->driver->free(stream->data);
 			free(stream);
+		}
 	}
 }
 
@@ -1286,6 +1300,7 @@ _pipe_close_cb(uv_handle_t *handle)
 	osc_stream_pipe_t *pipe = (void *)socket - offsetof(osc_stream_pipe_t, socket);
 	osc_stream_t *stream = (void *)pipe - offsetof(osc_stream_t, pipe);
 
+	stream->driver->free(stream->data);
 	free(stream);
 }
 
@@ -1530,7 +1545,10 @@ static inline osc_stream_t *
 osc_stream_new(uv_loop_t *loop, const char *addr, 
 	const osc_stream_driver_t *driver, void *data)
 {
-	if(!driver || !driver->send_req || !driver->send_adv || !driver->recv_req || !driver->recv_adv)
+	if(  !driver
+		|| !driver->send_req || !driver->send_adv
+		|| !driver->recv_req || !driver->recv_adv
+		|| !driver->free )
 		return NULL;
 
 	int err;
@@ -1556,6 +1574,7 @@ fail:
 	if(stream)
 	{
 		_instant_err(stream, "osc_stream_new", err);
+		stream->driver->free(stream->data);
 		free(stream);
 	}
 
