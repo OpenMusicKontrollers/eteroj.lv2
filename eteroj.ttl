@@ -20,6 +20,7 @@
 @prefix rdfs: 		<http://www.w3.org/2000/01/rdf-schema#> .
 @prefix lv2:			<http://lv2plug.in/ns/lv2core#> .
 @prefix ui:				<http://lv2plug.in/ns/extensions/ui#> .
+@prefix work:			<http://lv2plug.in/ns/ext/worker#> .
 @prefix atom:			<http://lv2plug.in/ns/ext/atom#> .
 @prefix midi:			<http://lv2plug.in/ns/ext/midi#> .
 @prefix time:			<http://lv2plug.in/ns/ext/time#> .
@@ -90,7 +91,8 @@ eteroj:io
 	doap:name "Eteroj OSC-IO" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:extensionData state:interface ;
+	lv2:extensionData work:interface, state:interface ;
+	lv2:requiredFeature work:schedule ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	lv2:port [
