@@ -90,8 +90,11 @@ struct _plughandle_t {
 	Evas_Object *port;
 	Evas_Object *addr;
 	Evas_Object *entry;
+	Evas_Object *popup;
 
 	Evas_Object *button;
+	
+	char *logo_path;
 };
 
 static void
@@ -343,223 +346,383 @@ _port_markup(void *data, Evas_Object *obj, char **txt)
 	}
 }
 
+static void
+_info_clicked(void *data, Evas_Object *obj, void *event_info)
+{
+	plughandle_t *handle = data;
+
+	// toggle popup
+	if(handle->popup)
+	{
+		if(evas_object_visible_get(handle->popup))
+			evas_object_hide(handle->popup);
+		else
+			evas_object_show(handle->popup);
+	}
+}
+
 static Evas_Object *
 _content_get(eo_ui_t *eoui)
 {
 	plughandle_t *handle = (void *)eoui - offsetof(plughandle_t, eoui);
 
 	Evas_Object *vbox = elm_box_add(eoui->win);
-	elm_box_horizontal_set(vbox, EINA_FALSE);
-	elm_box_homogeneous_set(vbox, EINA_FALSE);
-	elm_box_padding_set(vbox, 0, 0);
-
-	Evas_Object *sock = elm_frame_add(vbox);
-	elm_object_text_set(sock, "Socket Type");
-	evas_object_size_hint_weight_set(sock, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(sock, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_show(sock);
-	elm_box_pack_end(vbox, sock);
+	if(vbox)
 	{
-		Evas_Object *box = elm_box_add(sock);
-		elm_box_horizontal_set(box, EINA_FALSE);
-		elm_box_homogeneous_set(box, EINA_TRUE);
-		elm_box_padding_set(box, 0, 0);
-		evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
-		evas_object_show(box);
-		elm_object_content_set(sock, box);
+		elm_box_horizontal_set(vbox, EINA_FALSE);
+		elm_box_homogeneous_set(vbox, EINA_FALSE);
+		elm_box_padding_set(vbox, 0, 0);
 
-		Evas_Object *udp = elm_radio_add(box);
-		elm_radio_state_value_set(udp, ETEROJ_SOCKET_UDP);
-		elm_object_text_set(udp, "UDP");
-		evas_object_size_hint_align_set(udp, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(udp, "changed", _sock_changed, handle);
-		evas_object_show(udp);
-		elm_box_pack_end(box, udp);
-		handle->udp = udp;
+		Evas_Object *sock = elm_frame_add(vbox);
+		if(sock)
+		{
+			elm_object_text_set(sock, "Socket Type");
+			evas_object_size_hint_weight_set(sock, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+			evas_object_size_hint_align_set(sock, EVAS_HINT_FILL, EVAS_HINT_FILL);
+			evas_object_show(sock);
+			elm_box_pack_end(vbox, sock);
 
-		Evas_Object *tcp = elm_radio_add(box);
-		elm_radio_state_value_set(tcp, ETEROJ_SOCKET_TCP);
-		elm_radio_group_add(tcp, udp);
-		elm_object_text_set(tcp, "TCP (size prefix framed)");
-		evas_object_size_hint_align_set(tcp, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(tcp, "changed", _sock_changed, handle);
-		evas_object_show(tcp);
-		elm_box_pack_end(box, tcp);
-		handle->tcp = tcp;
+			Evas_Object *box = elm_box_add(sock);
+			if(box)
+			{
+				elm_box_horizontal_set(box, EINA_FALSE);
+				elm_box_homogeneous_set(box, EINA_TRUE);
+				elm_box_padding_set(box, 0, 0);
+				evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+				evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
+				evas_object_show(box);
+				elm_object_content_set(sock, box);
 
-		Evas_Object *tcp_slip = elm_radio_add(box);
-		elm_radio_state_value_set(tcp_slip, ETEROJ_SOCKET_TCP_SLIP);
-		elm_radio_group_add(tcp_slip, udp);
-		elm_object_text_set(tcp_slip, "TCP (SLIP framed)");
-		evas_object_size_hint_align_set(tcp_slip, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(tcp_slip, "changed", _sock_changed, handle);
-		evas_object_show(tcp_slip);
-		elm_box_pack_end(box, tcp_slip);
-		handle->tcp_slip = tcp_slip;
+				Evas_Object *udp = elm_radio_add(box);
+				if(udp)
+				{
+					elm_radio_state_value_set(udp, ETEROJ_SOCKET_UDP);
+					elm_object_text_set(udp, "UDP");
+					evas_object_size_hint_align_set(udp, 0.f, EVAS_HINT_FILL);
+					evas_object_smart_callback_add(udp, "changed", _sock_changed, handle);
+					evas_object_show(udp);
+					elm_box_pack_end(box, udp);
+					handle->udp = udp;
+				}
 
-		Evas_Object *pipe = elm_radio_add(box);
-		elm_radio_state_value_set(pipe, ETEROJ_SOCKET_PIPE);
-		elm_radio_group_add(pipe, udp);
-		elm_object_text_set(pipe, "Serial (SLIP framed)");
-		evas_object_size_hint_align_set(pipe, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(pipe, "changed", _sock_changed, handle);
-		evas_object_show(pipe);
-		elm_box_pack_end(box, pipe);
-		handle->pipe = pipe;
+				Evas_Object *tcp = elm_radio_add(box);
+				if(tcp)
+				{
+					elm_radio_state_value_set(tcp, ETEROJ_SOCKET_TCP);
+					elm_radio_group_add(tcp, udp);
+					elm_object_text_set(tcp, "TCP (size prefix framed)");
+					evas_object_size_hint_align_set(tcp, 0.f, EVAS_HINT_FILL);
+					evas_object_smart_callback_add(tcp, "changed", _sock_changed, handle);
+					evas_object_show(tcp);
+					elm_box_pack_end(box, tcp);
+					handle->tcp = tcp;
+				}
+
+				Evas_Object *tcp_slip = elm_radio_add(box);
+				if(tcp_slip)
+				{
+					elm_radio_state_value_set(tcp_slip, ETEROJ_SOCKET_TCP_SLIP);
+					elm_radio_group_add(tcp_slip, udp);
+					elm_object_text_set(tcp_slip, "TCP (SLIP framed)");
+					evas_object_size_hint_align_set(tcp_slip, 0.f, EVAS_HINT_FILL);
+					evas_object_smart_callback_add(tcp_slip, "changed", _sock_changed, handle);
+					evas_object_show(tcp_slip);
+					elm_box_pack_end(box, tcp_slip);
+					handle->tcp_slip = tcp_slip;
+				}
+
+				Evas_Object *pipe = elm_radio_add(box);
+				if(pipe)
+				{
+					elm_radio_state_value_set(pipe, ETEROJ_SOCKET_PIPE);
+					elm_radio_group_add(pipe, udp);
+					elm_object_text_set(pipe, "Serial (SLIP framed)");
+					evas_object_size_hint_align_set(pipe, 0.f, EVAS_HINT_FILL);
+					evas_object_smart_callback_add(pipe, "changed", _sock_changed, handle);
+					evas_object_show(pipe);
+					elm_box_pack_end(box, pipe);
+					handle->pipe = pipe;
+				}
+			}
+		}
+
+		Evas_Object *hbox = elm_box_add(vbox);
+		if(hbox)
+		{
+			elm_box_horizontal_set(hbox, EINA_TRUE);
+			elm_box_homogeneous_set(hbox, EINA_TRUE);
+			elm_box_padding_set(hbox, 0, 0);
+			evas_object_size_hint_weight_set(hbox, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+			evas_object_size_hint_align_set(hbox, EVAS_HINT_FILL, EVAS_HINT_FILL);
+			evas_object_show(hbox);
+			elm_box_pack_end(vbox, hbox);
+			handle->hbox = hbox;
+
+			Evas_Object *ipv = elm_frame_add(hbox);
+			if(ipv)
+			{
+				elm_object_text_set(ipv, "IP Version");
+				evas_object_size_hint_weight_set(ipv, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+				evas_object_size_hint_align_set(ipv, EVAS_HINT_FILL, EVAS_HINT_FILL);
+				evas_object_show(ipv);
+				elm_box_pack_end(hbox, ipv);
+
+				Evas_Object *box = elm_box_add(ipv);
+				if(box)
+				{
+					elm_box_horizontal_set(box, EINA_FALSE);
+					elm_box_homogeneous_set(box, EINA_TRUE);
+					elm_box_padding_set(box, 0, 0);
+					evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+					evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
+					evas_object_show(box);
+					elm_object_content_set(ipv, box);
+
+					Evas_Object *ipv4 = elm_radio_add(box);
+					if(ipv4)
+					{
+						elm_radio_state_value_set(ipv4, ETEROJ_VERSION_4);
+						elm_object_text_set(ipv4, "IPv4");
+						evas_object_size_hint_align_set(ipv4, 0.f, EVAS_HINT_FILL);
+						evas_object_smart_callback_add(ipv4, "changed", _version_changed, handle);
+						evas_object_show(ipv4);
+						elm_box_pack_end(box, ipv4);
+						handle->ipv4 = ipv4;
+					}
+
+					Evas_Object *ipv6 = elm_radio_add(box);
+					if(ipv6)
+					{
+						elm_radio_state_value_set(ipv6, ETEROJ_VERSION_6);
+						elm_radio_group_add(ipv6, ipv4);
+						elm_object_text_set(ipv6, "IPv6");
+						evas_object_size_hint_align_set(ipv6, 0.f, EVAS_HINT_FILL);
+						evas_object_smart_callback_add(ipv6, "changed", _version_changed, handle);
+						evas_object_show(ipv6);
+						elm_box_pack_end(box, ipv6);
+						handle->ipv6 = ipv6;
+					}
+				}
+			}
+
+			Evas_Object *role = elm_frame_add(hbox);
+			if(role)
+			{
+				elm_object_text_set(role, "IP Role");
+				evas_object_size_hint_weight_set(role, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+				evas_object_size_hint_align_set(role, EVAS_HINT_FILL, EVAS_HINT_FILL);
+				evas_object_show(role);
+				elm_box_pack_end(hbox, role);
+
+				Evas_Object *box = elm_box_add(role);
+				if(box)
+				{
+					elm_box_horizontal_set(box, EINA_FALSE);
+					elm_box_homogeneous_set(box, EINA_TRUE);
+					elm_box_padding_set(box, 0, 0);
+					evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+					evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
+					evas_object_show(box);
+					elm_object_content_set(role, box);
+
+					Evas_Object *server = elm_radio_add(box);
+					if(server)
+					{
+						elm_radio_state_value_set(server, ETEROJ_ROLE_SERVER);
+						elm_object_text_set(server, "Server");
+						evas_object_size_hint_align_set(server, 0.f, EVAS_HINT_FILL);
+						evas_object_smart_callback_add(server, "changed", _role_changed, handle);
+						evas_object_show(server);
+						elm_box_pack_end(box, server);
+						handle->server = server;
+					}
+
+					Evas_Object *client = elm_radio_add(box);
+					if(client)
+					{
+						elm_radio_state_value_set(client, ETEROJ_ROLE_CLIENT);
+						elm_radio_group_add(client, server);
+						elm_object_text_set(client, "Client");
+						evas_object_size_hint_align_set(client, 0.f, EVAS_HINT_FILL);
+						evas_object_smart_callback_add(client, "changed", _role_changed, handle);
+						evas_object_show(client);
+						elm_box_pack_end(box, client);
+						handle->client = client;
+					}
+				}
+			}
+
+			Evas_Object *port = elm_frame_add(hbox);
+			if(port)
+			{
+				elm_object_text_set(port, "IP Port");
+				evas_object_size_hint_weight_set(port, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+				evas_object_size_hint_align_set(port, EVAS_HINT_FILL, EVAS_HINT_FILL);
+				evas_object_show(port);
+				elm_box_pack_end(hbox, port);
+
+				Evas_Object *box = elm_box_add(port);
+				if(box)
+				{
+					elm_box_horizontal_set(box, EINA_FALSE);
+					elm_box_homogeneous_set(box, EINA_TRUE);
+					elm_box_padding_set(box, 0, 0);
+					evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+					evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
+					evas_object_show(box);
+					elm_object_content_set(port, box);
+
+					Evas_Object *entry = elm_entry_add(box);
+					if(entry)
+					{
+						char buf [16];
+						sprintf(buf, "%hu", handle->net_port);
+
+						elm_entry_entry_set(entry, buf);
+						elm_entry_single_line_set(entry, EINA_TRUE);
+						elm_entry_editable_set(entry, EINA_TRUE);
+						elm_entry_markup_filter_append(entry, _port_markup, handle);
+						evas_object_size_hint_weight_set(entry, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+						evas_object_size_hint_align_set(entry, 0.f, 0.f);
+						evas_object_smart_callback_add(entry, "changed", _port_changed, handle);
+						evas_object_show(entry);
+						elm_box_pack_end(box, entry);
+						handle->port = entry;
+					}
+				}
+			}
+		}
+
+		Evas_Object *addr = elm_frame_add(vbox);
+		if(addr)
+		{
+			elm_object_text_set(addr, "IP Address");
+			evas_object_size_hint_weight_set(addr, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+			evas_object_size_hint_align_set(addr, EVAS_HINT_FILL, EVAS_HINT_FILL);
+			evas_object_show(addr);
+			elm_box_pack_end(vbox, addr);
+			handle->addr = addr;
+
+			Evas_Object *box = elm_box_add(addr);
+			if(box)
+			{
+				elm_box_horizontal_set(box, EINA_FALSE);
+				elm_box_homogeneous_set(box, EINA_TRUE);
+				elm_box_padding_set(box, 0, 0);
+				evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+				evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
+				evas_object_show(box);
+				elm_object_content_set(addr, box);
+
+				Evas_Object *entry = elm_entry_add(box);
+				if(entry)
+				{
+					elm_entry_entry_set(entry, handle->net_address);
+					elm_entry_single_line_set(entry, EINA_TRUE);
+					elm_entry_editable_set(entry, EINA_TRUE);
+					evas_object_size_hint_weight_set(entry, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+					evas_object_size_hint_align_set(entry, 0.f, 0.f);
+					evas_object_smart_callback_add(entry, "changed", _address_changed, handle);
+					evas_object_show(entry);
+					elm_box_pack_end(box, entry);
+					handle->entry = entry;
+				}
+			}
+		}
+
+		hbox = elm_box_add(vbox);
+		if(hbox)
+		{
+			elm_box_horizontal_set(hbox, EINA_TRUE);
+			elm_box_homogeneous_set(hbox, EINA_FALSE);
+			elm_box_pack_end(vbox, hbox);
+			evas_object_size_hint_weight_set(hbox, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+			evas_object_size_hint_align_set(hbox, EVAS_HINT_FILL, 1.f);
+			evas_object_show(hbox);
+
+			Evas_Object *button = elm_button_add(hbox);
+			if(button)
+			{
+				elm_object_text_set(button, "connect");
+				evas_object_size_hint_weight_set(button, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+				evas_object_size_hint_align_set(button, EVAS_HINT_FILL, EVAS_HINT_FILL);
+				evas_object_smart_callback_add(button, "clicked", _connect, handle);
+				evas_object_show(button);
+				elm_box_pack_end(hbox, button);
+				handle->button = button;
+			}
+			
+			Evas_Object *info = elm_button_add(hbox);
+			if(info)
+			{
+				evas_object_smart_callback_add(info, "clicked", _info_clicked, handle);
+				evas_object_size_hint_weight_set(info, 0.f, 0.f);
+				evas_object_size_hint_align_set(info, 1.f, EVAS_HINT_FILL);
+				evas_object_show(info);
+				elm_box_pack_end(hbox, info);
+					
+				Evas_Object *icon = elm_icon_add(info);
+				if(icon)
+				{
+					elm_layout_file_set(icon, handle->logo_path, NULL);
+					evas_object_size_hint_min_set(icon, 20, 20);
+					evas_object_size_hint_max_set(icon, 32, 32);
+					//evas_object_size_hint_aspect_set(icon, EVAS_ASPECT_CONTROL_BOTH, 1, 1);
+					evas_object_show(icon);
+					elm_object_part_content_set(info, "icon", icon);
+				}
+			}
+		}
+		
+		Evas_Object *popup = elm_popup_add(vbox);
+		if(popup)
+		{
+			elm_popup_allow_events_set(popup, EINA_TRUE);
+			handle->popup = popup;
+
+			Evas_Object *hbox = elm_box_add(popup);
+			if(hbox)
+			{
+				elm_box_horizontal_set(hbox, EINA_TRUE);
+				elm_box_homogeneous_set(hbox, EINA_FALSE);
+				elm_box_padding_set(hbox, 10, 0);
+				evas_object_show(hbox);
+				elm_object_content_set(popup, hbox);
+
+				Evas_Object *icon = elm_icon_add(hbox);
+				if(icon)
+				{
+					elm_layout_file_set(icon, handle->logo_path, NULL);
+					evas_object_size_hint_min_set(icon, 128, 128);
+					evas_object_size_hint_max_set(icon, 256, 256);
+					evas_object_size_hint_aspect_set(icon, EVAS_ASPECT_CONTROL_BOTH, 1, 1);
+					evas_object_show(icon);
+					elm_box_pack_end(hbox, icon);
+				}
+
+				Evas_Object *label = elm_label_add(hbox);
+				if(label)
+				{
+					elm_object_text_set(label,
+						"<color=#b00 shadow_color=#fff font_size=20>"
+						"Eteroj - OSC Comm"
+						"</color></br><align=left>"
+						"Version "ETEROJ_VERSION"</br></br>"
+						"Copyright (c) 2015 Hanspeter Portner</br></br>"
+						"This is free and libre software</br>"
+						"Released under Artistic License 2.0</br>"
+						"By Open Music Kontrollers</br></br>"
+						"<color=#bbb>"
+						"http://open-music-kontrollers.ch/lv2/eteroj</br>"
+						"dev@open-music-kontrollers.ch"
+						"</color></align>");
+
+					evas_object_show(label);
+					elm_box_pack_end(hbox, label);
+				}
+			}
+		}
 	}
-
-	Evas_Object *hbox = elm_box_add(vbox);
-	elm_box_horizontal_set(hbox, EINA_TRUE);
-	elm_box_homogeneous_set(hbox, EINA_TRUE);
-	elm_box_padding_set(hbox, 0, 0);
-	evas_object_size_hint_weight_set(hbox, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(hbox, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_show(hbox);
-	elm_box_pack_end(vbox, hbox);
-	handle->hbox = hbox;
-
-	Evas_Object *ipv = elm_frame_add(hbox);
-	elm_object_text_set(ipv, "IP Version");
-	evas_object_size_hint_weight_set(ipv, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(ipv, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_show(ipv);
-	elm_box_pack_end(hbox, ipv);
-	{
-		Evas_Object *box = elm_box_add(ipv);
-		elm_box_horizontal_set(box, EINA_FALSE);
-		elm_box_homogeneous_set(box, EINA_TRUE);
-		elm_box_padding_set(box, 0, 0);
-		evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
-		evas_object_show(box);
-		elm_object_content_set(ipv, box);
-
-		Evas_Object *ipv4 = elm_radio_add(box);
-		elm_radio_state_value_set(ipv4, ETEROJ_VERSION_4);
-		elm_object_text_set(ipv4, "IPv4");
-		evas_object_size_hint_align_set(ipv4, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(ipv4, "changed", _version_changed, handle);
-		evas_object_show(ipv4);
-		elm_box_pack_end(box, ipv4);
-		handle->ipv4 = ipv4;
-
-		Evas_Object *ipv6 = elm_radio_add(box);
-		elm_radio_state_value_set(ipv6, ETEROJ_VERSION_6);
-		elm_radio_group_add(ipv6, ipv4);
-		elm_object_text_set(ipv6, "IPv6");
-		evas_object_size_hint_align_set(ipv6, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(ipv6, "changed", _version_changed, handle);
-		evas_object_show(ipv6);
-		elm_box_pack_end(box, ipv6);
-		handle->ipv6 = ipv6;
-	}
-
-	Evas_Object *role = elm_frame_add(hbox);
-	elm_object_text_set(role, "IP Role");
-	evas_object_size_hint_weight_set(role, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(role, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_show(role);
-	elm_box_pack_end(hbox, role);
-	{
-		Evas_Object *box = elm_box_add(role);
-		elm_box_horizontal_set(box, EINA_FALSE);
-		elm_box_homogeneous_set(box, EINA_TRUE);
-		elm_box_padding_set(box, 0, 0);
-		evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
-		evas_object_show(box);
-		elm_object_content_set(role, box);
-
-		Evas_Object *server = elm_radio_add(box);
-		elm_radio_state_value_set(server, ETEROJ_ROLE_SERVER);
-		elm_object_text_set(server, "Server");
-		evas_object_size_hint_align_set(server, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(server, "changed", _role_changed, handle);
-		evas_object_show(server);
-		elm_box_pack_end(box, server);
-		handle->server = server;
-
-		Evas_Object *client = elm_radio_add(box);
-		elm_radio_state_value_set(client, ETEROJ_ROLE_CLIENT);
-		elm_radio_group_add(client, server);
-		elm_object_text_set(client, "Client");
-		evas_object_size_hint_align_set(client, 0.f, EVAS_HINT_FILL);
-		evas_object_smart_callback_add(client, "changed", _role_changed, handle);
-		evas_object_show(client);
-		elm_box_pack_end(box, client);
-		handle->client = client;
-	}
-
-	Evas_Object *port = elm_frame_add(hbox);
-	elm_object_text_set(port, "IP Port");
-	evas_object_size_hint_weight_set(port, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(port, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_show(port);
-	elm_box_pack_end(hbox, port);
-	{
-		Evas_Object *box = elm_box_add(port);
-		elm_box_horizontal_set(box, EINA_FALSE);
-		elm_box_homogeneous_set(box, EINA_TRUE);
-		elm_box_padding_set(box, 0, 0);
-		evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
-		evas_object_show(box);
-		elm_object_content_set(port, box);
-
-		char buf [16];
-		sprintf(buf, "%hu", handle->net_port);
-
-		Evas_Object *entry = elm_entry_add(box);
-		elm_entry_entry_set(entry, buf);
-		elm_entry_single_line_set(entry, EINA_TRUE);
-		elm_entry_editable_set(entry, EINA_TRUE);
-		elm_entry_markup_filter_append(entry, _port_markup, handle);
-		evas_object_size_hint_weight_set(entry, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(entry, 0.f, 0.f);
-		evas_object_smart_callback_add(entry, "changed", _port_changed, handle);
-		evas_object_show(entry);
-		elm_box_pack_end(box, entry);
-		handle->port = entry;
-	}
-
-	Evas_Object *addr = elm_frame_add(vbox);
-	elm_object_text_set(addr, "IP Address");
-	evas_object_size_hint_weight_set(addr, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(addr, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_show(addr);
-	elm_box_pack_end(vbox, addr);
-	handle->addr = addr;
-	{
-		Evas_Object *box = elm_box_add(addr);
-		elm_box_horizontal_set(box, EINA_FALSE);
-		elm_box_homogeneous_set(box, EINA_TRUE);
-		elm_box_padding_set(box, 0, 0);
-		evas_object_size_hint_weight_set(box, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(box, EVAS_HINT_FILL, EVAS_HINT_FILL);
-		evas_object_show(box);
-		elm_object_content_set(addr, box);
-
-		Evas_Object *entry = elm_entry_add(box);
-		elm_entry_entry_set(entry, handle->net_address);
-		elm_entry_single_line_set(entry, EINA_TRUE);
-		elm_entry_editable_set(entry, EINA_TRUE);
-		evas_object_size_hint_weight_set(entry, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-		evas_object_size_hint_align_set(entry, 0.f, 0.f);
-		evas_object_smart_callback_add(entry, "changed", _address_changed, handle);
-		evas_object_show(entry);
-		elm_box_pack_end(box, entry);
-		handle->entry = entry;
-	}
-
-	Evas_Object *button = elm_button_add(vbox);
-	elm_object_text_set(button, "connect");
-	evas_object_size_hint_weight_set(button, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
-	evas_object_size_hint_align_set(button, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_smart_callback_add(button, "clicked", _connect, handle);
-	evas_object_show(button);
-	elm_box_pack_end(vbox, button);
-	handle->button = button;
 	
 	_url_update(handle);
 
@@ -637,6 +800,8 @@ instantiate(const LV2UI_Descriptor *descriptor, const char *plugin_uri,
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
+	asprintf(&handle->logo_path, "%s/omk_logo_256x256.png", bundle_path);
+
 	if(eoui_instantiate(eoui, descriptor, plugin_uri, bundle_path, write_function,
 		controller, widget, features))
 	{
@@ -673,6 +838,10 @@ cleanup(LV2UI_Handle instance)
 		return;
 
 	eoui_cleanup(&handle->eoui);
+
+	if(handle->logo_path)
+		free(handle->logo_path);
+
 	free(handle);
 }
 

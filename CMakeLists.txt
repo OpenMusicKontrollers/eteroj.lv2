@@ -11,6 +11,10 @@ include_directories(${PROJECT_SOURCE_DIR}/varchunk)
 include_directories(${PROJECT_BINARY_DIR})
 
 set(CMAKE_C_FALGS "-std=gnu99 ${CMAKE_C_FLAGS}")
+add_definitions("-D_GNU_SOURCE=1") # asprintf
+
+set(ETEROJ_VERSION "0.1.0_alpha")
+add_definitions("-DETEROJ_VERSION=\"${ETEROJ_VERSION}\"")
 
 set(DEST lib/lv2/eteroj.lv2)
 if(WIN32)
@@ -65,3 +69,4 @@ install(TARGETS eteroj_ui DESTINATION ${DEST})
 # manifest
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/manifest.ttl.in ${PROJECT_BINARY_DIR}/manifest.ttl)
 install(FILES ${PROJECT_BINARY_DIR}/manifest.ttl DESTINATION ${DEST})
+install(FILES ${PROJECT_SOURCE_DIR}/omk_logo_256x256.png DESTINATION ${DEST})
