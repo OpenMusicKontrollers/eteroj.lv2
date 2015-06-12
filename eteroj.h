@@ -27,6 +27,7 @@
 #include "lv2/lv2plug.in/ns/ext/worker/worker.h"
 #include "lv2/lv2plug.in/ns/ext/state/state.h"
 #include "lv2/lv2plug.in/ns/ext/log/log.h"
+#include "lv2/lv2plug.in/ns/ext/patch/patch.h"
 #include "lv2/lv2plug.in/ns/extensions/ui/ui.h"
 #include "lv2/lv2plug.in/ns/lv2core/lv2.h"
 
@@ -37,6 +38,9 @@
 
 #define ETEROJ_EVENT_URI							ETEROJ_URI"#event"
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"
+#define ETEROJ_ERROR_URI							ETEROJ_URI"#error"
+#define ETEROJ_ERROR_WHERE_URI				ETEROJ_URI"#errorWhere"
+#define ETEROJ_ERROR_WHAT_URI					ETEROJ_URI"#errorWhat"
 
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"

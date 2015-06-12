@@ -55,6 +55,9 @@ struct _plughandle_t {
 		LV2_URID event_transfer;
 		LV2_URID eteroj_event;
 		LV2_URID eteroj_url;
+		LV2_URID eteroj_error;
+		LV2_URID eteroj_error_where;
+		LV2_URID eteroj_error_what;
 	} uri;
 
 	LV2_Atom_Forge forge;
@@ -797,6 +800,12 @@ instantiate(const LV2UI_Descriptor *descriptor, const char *plugin_uri,
 		ETEROJ_EVENT_URI);
 	handle->uri.eteroj_url = handle->map->map(handle->map->handle,
 		ETEROJ_URL_URI);
+	handle->uri.eteroj_error = handle->map->map(handle->map->handle,
+		ETEROJ_ERROR_URI);
+	handle->uri.eteroj_error_where = handle->map->map(handle->map->handle,
+		ETEROJ_ERROR_WHERE_URI);
+	handle->uri.eteroj_error_what = handle->map->map(handle->map->handle,
+		ETEROJ_ERROR_WHAT_URI);
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
@@ -856,10 +865,31 @@ port_event(LV2UI_Handle instance, uint32_t port_index, uint32_t size,
 		const eteroj_event_t *et = (const eteroj_event_t *)buffer;
 
 		if(  (et->obj.atom.type == handle->forge.Object)
-			&& (et->obj.body.id == handle->uri.eteroj_event)
-			&& (et->obj.body.otype == handle->uri.eteroj_url) )
+			&& (et->obj.body.id == handle->uri.eteroj_event) )
 		{
-			_ui_update(handle, et->url);
+			if(et->obj.body.otype == handle->uri.eteroj_url)
+			{
+				_ui_update(handle, et->url);
+			}
+			else if(et->obj.body.otype == handle->uri.eteroj_error)
+			{
+				const LV2_Atom_String *where = NULL;
+				const LV2_Atom_String *what = NULL;
+
+				LV2_Atom_Object_Query q [] = {
+					{ handle->uri.eteroj_error_where, (const LV2_Atom **)&where },
+					{ handle->uri.eteroj_error_what, (const LV2_Atom **)&what },
+					LV2_ATOM_OBJECT_QUERY_END
+				};
+
+				lv2_atom_object_query(&et->obj, q);
+
+				if(where && what)
+				{
+					fprintf(stderr, "ui got error: '%s' at '%s'\n",
+						LV2_ATOM_BODY_CONST(what), LV2_ATOM_BODY_CONST(where));
+				}
+			}
 		}
 	}
 }

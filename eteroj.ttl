@@ -27,6 +27,7 @@
 @prefix ui:   		<http://lv2plug.in/ns/extensions/ui#> .
 @prefix state:		<http://lv2plug.in/ns/ext/state#> .
 @prefix log:			<http://lv2plug.in/ns/ext/log#> .
+@prefix patch:		<http://lv2plug.in/ns/ext/patch#> .
 @prefix kx:				<http://kxstudio.sf.net/ns/lv2ext/external-ui#> .
 
 @prefix lic:			<http://opensource.org/licenses/> .
@@ -46,6 +47,11 @@ proj:eteroj
 	a doap:Project ;
 	doap:maintainer omk:me ;
 	doap:name "Eteroj OSC Bundle" .
+
+eteroj:url
+	a lv2:Parameter ;
+	rdfs:label "Url" ;
+	rdfs:range atom:String .
 
 # Eteroj IO UI
 eteroj:io_eo
@@ -95,6 +101,9 @@ eteroj:io
 	lv2:requiredFeature work:schedule ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
+	patch:writable eteroj:url ;
+	patch:readable eteroj:url ;
+
 	lv2:port [
 		# sink event port
 	  a lv2:InputPort ,
@@ -141,6 +150,7 @@ eteroj:io
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
 		atom:supports atom:Object ;
+		atom:supports patch:Message ;
 		lv2:index 3 ;
 		lv2:symbol "control" ;
 		lv2:name "Control" ;
@@ -150,6 +160,7 @@ eteroj:io
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
 		atom:supports atom:Object ;
+		atom:supports patch:Message ;
 		lv2:index 4 ;
 		lv2:symbol "notify" ;
 		lv2:name "Notify" ;
