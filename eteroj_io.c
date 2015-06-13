@@ -56,14 +56,11 @@ struct _plughandle_t {
 		LV2_URID log_trace;
 		
 		LV2_URID patch_message;
-		LV2_URID patch_response;
 		LV2_URID patch_set;
 		LV2_URID patch_get;
 		LV2_URID patch_subject;
 		LV2_URID patch_property;
 		LV2_URID patch_value;
-		LV2_URID patch_request;
-		LV2_URID patch_body;
 	} uris;
 
 	osc_forge_t oforge;
@@ -661,8 +658,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	
 	handle->uris.patch_message = handle->map->map(handle->map->handle,
 		LV2_PATCH__Message);
-	handle->uris.patch_response = handle->map->map(handle->map->handle,
-		LV2_PATCH__Response);
 	handle->uris.patch_set = handle->map->map(handle->map->handle,
 		LV2_PATCH__Set);
 	handle->uris.patch_get = handle->map->map(handle->map->handle,
@@ -673,10 +668,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		LV2_PATCH__property);
 	handle->uris.patch_value = handle->map->map(handle->map->handle,
 		LV2_PATCH__value);
-	handle->uris.patch_request = handle->map->map(handle->map->handle,
-		LV2_PATCH__request);
-	handle->uris.patch_body = handle->map->map(handle->map->handle,
-		LV2_PATCH__body);
 
 	osc_forge_init(&handle->oforge, handle->map);
 	lv2_atom_forge_init(&handle->forge, handle->map);
@@ -937,12 +928,12 @@ run(LV2_Handle instance, uint32_t nsamples)
 					lv2_atom_forge_frame_time(forge, 0);
 					LV2_Atom_Forge_Frame obj_frame;
 					lv2_atom_forge_object(forge, &obj_frame, 0, //handle->uris.patch_message,
-						handle->uris.patch_response);
+						handle->uris.patch_set);
 					lv2_atom_forge_key(forge, handle->uris.patch_subject);
 						lv2_atom_forge_urid(forge, handle->uris.subject);
-					lv2_atom_forge_key(forge, handle->uris.patch_request);
+					lv2_atom_forge_key(forge, handle->uris.patch_property);
 						lv2_atom_forge_urid(forge, handle->uris.eteroj_url);
-					lv2_atom_forge_key(forge, handle->uris.patch_body);
+					lv2_atom_forge_key(forge, handle->uris.patch_value);
 						lv2_atom_forge_string(forge, new_url, strlen(new_url)); //FIXME
 					lv2_atom_forge_pop(forge, &obj_frame);
 				}
@@ -972,12 +963,12 @@ run(LV2_Handle instance, uint32_t nsamples)
 					lv2_atom_forge_frame_time(forge, 0);
 					LV2_Atom_Forge_Frame obj_frame;
 					lv2_atom_forge_object(forge, &obj_frame, 0, //handle->uris.patch_message,
-						handle->uris.patch_response);
+						handle->uris.patch_set);
 					lv2_atom_forge_key(forge, handle->uris.patch_subject);
 						lv2_atom_forge_urid(forge, handle->uris.subject);
-					lv2_atom_forge_key(forge, handle->uris.patch_request);
+					lv2_atom_forge_key(forge, handle->uris.patch_property);
 						lv2_atom_forge_urid(forge, handle->uris.eteroj_url);
-					lv2_atom_forge_key(forge, handle->uris.patch_body);
+					lv2_atom_forge_key(forge, handle->uris.patch_value);
 						lv2_atom_forge_string(forge, handle->osc_url, strlen(handle->osc_url)); //FIXME
 					lv2_atom_forge_pop(forge, &obj_frame);
 				}
