@@ -28,6 +28,7 @@
 @prefix state:		<http://lv2plug.in/ns/ext/state#> .
 @prefix log:			<http://lv2plug.in/ns/ext/log#> .
 @prefix patch:		<http://lv2plug.in/ns/ext/patch#> .
+@prefix urid:			<http://lv2plug.in/ns/ext/urid#> .
 @prefix kx:				<http://kxstudio.sf.net/ns/lv2ext/external-ui#> .
 
 @prefix lic:			<http://opensource.org/licenses/> .
@@ -61,7 +62,7 @@ eteroj:io_eo
 		lv2:symbol "notify" ;
 		ui:protocol atom:eventTransfer ;
 	] ;
-	lv2:requiredFeature ui:idleInterface, ui:portMap .
+	lv2:requiredFeature ui:idleInterface, ui:portMap, urid:map .
 eteroj:io_ui
 	a ui:UI ;
 	ui:portNotification [
@@ -69,7 +70,7 @@ eteroj:io_ui
 		lv2:symbol "notify" ;
 		ui:protocol atom:eventTransfer ;
 	] ;
-	lv2:requiredFeature ui:idleInterface, ui:portMap ;
+	lv2:requiredFeature ui:idleInterface, ui:portMap, urid:map ;
   lv2:extensionData ui:idleInterface, ui:showInterface .
 eteroj:io_x11
 	a ui:X11UI ;
@@ -78,7 +79,7 @@ eteroj:io_x11
 		lv2:symbol "notify" ;
 		ui:protocol atom:eventTransfer ;
 	] ;
-	lv2:requiredFeature ui:idleInterface, ui:portMap ;
+	lv2:requiredFeature ui:idleInterface, ui:portMap, urid:map ;
 	lv2:optionalFeature ui:resize ;
   lv2:extensionData ui:idleInterface .
 eteroj:io_kx
@@ -88,7 +89,7 @@ eteroj:io_kx
 		lv2:symbol "notify" ;
 		ui:protocol atom:eventTransfer ;
 	] ;
-	lv2:requiredFeature kx:Host, ui:portMap .
+	lv2:requiredFeature kx:Host, ui:portMap, urid:map .
 
 # IO Plugin
 eteroj:io
@@ -98,7 +99,7 @@ eteroj:io
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
-	lv2:requiredFeature work:schedule ;
+	lv2:requiredFeature work:schedule, urid:map ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	patch:writable eteroj:url ;
