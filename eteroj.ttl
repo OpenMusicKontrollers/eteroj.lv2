@@ -19,17 +19,14 @@
 @prefix rdf:			<http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: 		<http://www.w3.org/2000/01/rdf-schema#> .
 @prefix lv2:			<http://lv2plug.in/ns/lv2core#> .
-@prefix ui:				<http://lv2plug.in/ns/extensions/ui#> .
 @prefix work:			<http://lv2plug.in/ns/ext/worker#> .
 @prefix atom:			<http://lv2plug.in/ns/ext/atom#> .
 @prefix midi:			<http://lv2plug.in/ns/ext/midi#> .
 @prefix time:			<http://lv2plug.in/ns/ext/time#> .
-@prefix ui:   		<http://lv2plug.in/ns/extensions/ui#> .
 @prefix state:		<http://lv2plug.in/ns/ext/state#> .
 @prefix log:			<http://lv2plug.in/ns/ext/log#> .
 @prefix patch:		<http://lv2plug.in/ns/ext/patch#> .
 @prefix urid:			<http://lv2plug.in/ns/ext/urid#> .
-@prefix kx:				<http://kxstudio.sf.net/ns/lv2ext/external-ui#> .
 
 @prefix lic:			<http://opensource.org/licenses/> .
 @prefix omk:			<http://open-music-kontrollers.ch/ventosus#> .
@@ -54,42 +51,10 @@ eteroj:url
 	rdfs:label "Url" ;
 	rdfs:range atom:String .
 
-# Eteroj IO UI
-eteroj:io_eo
-	a ui:EoUI ;
-	ui:portNotification [
-		ui:plugin eteroj:io ;
-		lv2:symbol "notify" ;
-		ui:protocol atom:eventTransfer ;
-	] ;
-	lv2:requiredFeature ui:idleInterface, ui:portMap, urid:map .
-eteroj:io_ui
-	a ui:UI ;
-	ui:portNotification [
-		ui:plugin eteroj:io ;
-		lv2:symbol "notify" ;
-		ui:protocol atom:eventTransfer ;
-	] ;
-	lv2:requiredFeature ui:idleInterface, ui:portMap, urid:map ;
-  lv2:extensionData ui:idleInterface, ui:showInterface .
-eteroj:io_x11
-	a ui:X11UI ;
-	ui:portNotification [
-		ui:plugin eteroj:io ;
-		lv2:symbol "notify" ;
-		ui:protocol atom:eventTransfer ;
-	] ;
-	lv2:requiredFeature ui:idleInterface, ui:portMap, urid:map ;
-	lv2:optionalFeature ui:resize ;
-  lv2:extensionData ui:idleInterface .
-eteroj:io_kx
-	a kx:Widget ;
-	ui:portNotification [
-		ui:plugin eteroj:io ;
-		lv2:symbol "notify" ;
-		ui:protocol atom:eventTransfer ;
-	] ;
-	lv2:requiredFeature kx:Host, ui:portMap, urid:map .
+eteroj:err
+	a lv2:Parameter ;
+	rdfs:label "Error" ;
+	rdfs:range atom:String .
 
 # IO Plugin
 eteroj:io
@@ -104,6 +69,8 @@ eteroj:io
 
 	patch:writable eteroj:url ;
 	patch:readable eteroj:url ;
+	
+	patch:readable eteroj:err ;
 
 	lv2:port [
 		# sink event port
@@ -113,6 +80,7 @@ eteroj:io
 		atom:supports midi:MidiEvent ;
 		atom:supports time:Position ;
 		atom:supports atom:Object ;
+		atom:supports patch:Message ;
 		lv2:index 0 ;
 		lv2:symbol "osc_in" ;
 		lv2:name "OSC Input" ;
@@ -125,6 +93,7 @@ eteroj:io
 		atom:supports midi:MidiEvent ;
 		atom:supports time:Position ;
 		atom:supports atom:Object ;
+		atom:supports patch:Message ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;
@@ -145,24 +114,4 @@ eteroj:io
 		lv2:scalePoint [ rdfs:label "Timedout" ;			rdf:value 1 ] ;
 		lv2:scalePoint [ rdfs:label "Ready" ;					rdf:value 2 ] ;
 		lv2:scalePoint [ rdfs:label "Connected" ;			rdf:value 3 ] ;
-	] , [
-		# control input port
-	  a lv2:InputPort ,
-			atom:AtomPort ;
-		atom:bufferType atom:Sequence ;
-		atom:supports atom:Object ;
-		atom:supports patch:Message ;
-		lv2:index 3 ;
-		lv2:symbol "control" ;
-		lv2:name "Control" ;
-	] , [
-		# notify output port
-	  a lv2:OutputPort ,
-			atom:AtomPort ;
-		atom:bufferType atom:Sequence ;
-		atom:supports atom:Object ;
-		atom:supports patch:Message ;
-		lv2:index 4 ;
-		lv2:symbol "notify" ;
-		lv2:name "Notify" ;
 	] .

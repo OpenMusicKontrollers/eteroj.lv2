@@ -38,24 +38,12 @@
 
 #define ETEROJ_EVENT_URI							ETEROJ_URI"#event"
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"
-#define ETEROJ_ERROR_URI							ETEROJ_URI"#error"
-#define ETEROJ_ERROR_WHERE_URI				ETEROJ_URI"#errorWhere"
-#define ETEROJ_ERROR_WHAT_URI					ETEROJ_URI"#errorWhat"
+#define ETEROJ_ERR_URI								ETEROJ_URI"#err"
 
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"
 
-#define ETEROJ_IO_EO_URI							ETEROJ_URI"#io_eo"
-#define ETEROJ_IO_UI_URI							ETEROJ_URI"#io_ui"
-#define ETEROJ_IO_KX_URI							ETEROJ_URI"#io_kx"
-#define ETEROJ_IO_X11_URI							ETEROJ_URI"#io_x11"
-
 extern const LV2_Descriptor eteroj_io;
-
-extern const LV2UI_Descriptor eteroj_io_eo;
-extern const LV2UI_Descriptor eteroj_io_ui;
-extern const LV2UI_Descriptor eteroj_io_kx;
-extern const LV2UI_Descriptor eteroj_io_x11;
 
 #define _ATOM_ALIGNED __attribute__((aligned(8)))
 

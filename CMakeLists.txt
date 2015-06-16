@@ -43,30 +43,6 @@ set_target_properties(eteroj PROPERTIES PREFIX "")
 install(TARGETS eteroj DESTINATION ${DEST})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/eteroj.ttl DESTINATION ${DEST})
 
-pkg_search_module(ELM REQUIRED elementary>=1.8)
-include_directories(${ELM_INCLUDE_DIRS})
-set(LIBS_UI ${LIBS_UI} ${ELM_LDFLAGS})
-
-pkg_search_module(ECORE_X OPTIONAL ecore-x)
-
-if((DEFINED ECORE_X_FOUND) AND ((${ELM_VERSION} VERSION_EQUAL "1.13.0") OR (${ELM_VERSION} VERSION_GREATER "1.13.0")))
-	message(STATUS "X11 UI wrap enabled")
-	set(X11_UI_WRAP "")
-	add_definitions("-DX11_UI_WRAP")
-else()
-	message(STATUS "X11 UI wrap disabled")
-	set(X11_UI_WRAP "#")
-endif()
-
-# eteroj_ui
-add_library(eteroj_ui MODULE
-	eteroj_ui.c
-	eteroj_io_ui.c)
-target_link_libraries(eteroj_ui ${LIBS_UI})
-set_target_properties(eteroj_ui PROPERTIES PREFIX "")
-install(TARGETS eteroj_ui DESTINATION ${DEST})
-
 # manifest
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/manifest.ttl.in ${PROJECT_BINARY_DIR}/manifest.ttl)
 install(FILES ${PROJECT_BINARY_DIR}/manifest.ttl DESTINATION ${DEST})
-install(FILES ${PROJECT_SOURCE_DIR}/omk_logo_256x256.png DESTINATION ${DEST})
