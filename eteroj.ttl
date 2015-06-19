@@ -51,16 +51,16 @@ eteroj:url
 	rdfs:label "Url" ;
 	rdfs:range atom:String .
 
-eteroj:err
+eteroj:status
 	a lv2:Parameter ;
-	rdfs:label "Error" ;
+	rdfs:label "Status" ;
 	rdfs:range atom:String .
 
 # IO Plugin
 eteroj:io
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
-	doap:name "Eteroj OSC-IO" ;
+	doap:name "Eteroj OSC Comm" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
@@ -70,7 +70,7 @@ eteroj:io
 	patch:writable eteroj:url ;
 	patch:readable eteroj:url ;
 	
-	patch:readable eteroj:err ;
+	patch:readable eteroj:status ;
 
 	lv2:port [
 		# sink event port
@@ -107,11 +107,12 @@ eteroj:io
 		lv2:name "State" ;
 		lv2:default 0.0 ;
 		lv2:minimum 0.0 ;
-		lv2:maximum 3.0 ;
+		lv2:maximum 4.0 ;
 		lv2:portProperty lv2:integer ;
 		lv2:portProperty lv2:enumeration ;
-		lv2:scalePoint [ rdfs:label "Disconnected" ;	rdf:value 0 ] ;
-		lv2:scalePoint [ rdfs:label "Timedout" ;			rdf:value 1 ] ;
-		lv2:scalePoint [ rdfs:label "Ready" ;					rdf:value 2 ] ;
-		lv2:scalePoint [ rdfs:label "Connected" ;			rdf:value 3 ] ;
+		lv2:scalePoint [ rdfs:label "Idle" ;					rdf:value 0 ] ;
+		lv2:scalePoint [ rdfs:label "Ready" ;					rdf:value 1 ] ;
+		lv2:scalePoint [ rdfs:label "Timedout" ;			rdf:value 2 ] ;
+		lv2:scalePoint [ rdfs:label "Errored" ;				rdf:value 3 ] ;
+		lv2:scalePoint [ rdfs:label "Connected" ;			rdf:value 4 ] ;
 	] .

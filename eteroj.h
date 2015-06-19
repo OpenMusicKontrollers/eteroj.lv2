@@ -38,21 +38,11 @@
 
 #define ETEROJ_EVENT_URI							ETEROJ_URI"#event"
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"
-#define ETEROJ_ERR_URI								ETEROJ_URI"#err"
+#define ETEROJ_STAT_URI								ETEROJ_URI"#status"
 
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"
 
 extern const LV2_Descriptor eteroj_io;
-
-#define _ATOM_ALIGNED __attribute__((aligned(8)))
-
-typedef struct _eteroj_event_t eteroj_event_t;
-
-struct _eteroj_event_t {
-	LV2_Atom_Object obj _ATOM_ALIGNED;
-	LV2_Atom_Property_Body prop _ATOM_ALIGNED;
-		char url [0] _ATOM_ALIGNED;
-} _ATOM_ALIGNED;
 
 #endif // _ETEROJ_LV2_H

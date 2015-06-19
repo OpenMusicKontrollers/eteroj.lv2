@@ -33,10 +33,11 @@ typedef enum _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
 
 enum _plugstate_t {
-	STATE_DISCONNECTED	= 0,
-	STATE_TIMEDOUT			= 1,
-	STATE_READY					= 2,
-	STATE_CONNECTED			= 3
+	STATE_IDLE					= 0,
+	STATE_READY					= 1,
+	STATE_TIMEDOUT			= 2,
+	STATE_ERRORED				= 3,
+	STATE_CONNECTED			= 4
 };
 
 struct _plughandle_t {
@@ -47,12 +48,12 @@ struct _plughandle_t {
 
 		LV2_URID eteroj_event;
 		LV2_URID eteroj_url;
-		LV2_URID eteroj_err;
-		
+		LV2_URID eteroj_stat;
+
 		LV2_URID log_note;
 		LV2_URID log_error;
 		LV2_URID log_trace;
-		
+
 		LV2_URID patch_message;
 		LV2_URID patch_set;
 		LV2_URID patch_get;
@@ -67,9 +68,10 @@ struct _plughandle_t {
 	volatile int needs_flushing;
 	volatile int restored;
 	volatile int url_updated;
-	volatile int err_updated;
+	volatile int status_updated;
 	volatile int reconnection_requested;
 	char osc_url [512];
+	char osc_status [512];
 
 	LV2_Log_Log *log;
 
@@ -162,7 +164,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 
 	return LV2_STATE_SUCCESS;
 }
-	
+
 static const LV2_State_Interface state_iface = {
 	.save = _state_save,
 	.restore = _state_restore
@@ -244,10 +246,10 @@ _work(LV2_Handle instance,
 
 	osc_dispatch_method(OSC_IMMEDIATE, body, size, worker_api, NULL, NULL, handle);
 	uv_run(&handle->loop, UV_RUN_NOWAIT);
-	
+
 	handle->respond = NULL;
 	handle->target = NULL;
-	
+
 	return LV2_WORKER_SUCCESS;
 }
 
@@ -257,7 +259,7 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	//TODO
+	// do nothing
 
 	return LV2_WORKER_SUCCESS;
 }
@@ -268,7 +270,7 @@ _end_run(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	//TODO
+	// do nothing
 
 	return LV2_WORKER_SUCCESS;
 }
@@ -336,7 +338,7 @@ _bundle_in(osc_time_t timestamp, void *data)
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	//FIXME check return value
+	//TODO check return
 	osc_forge_bundle_push(&handle->oforge, forge, handle->data.frame, timestamp);
 }
 
@@ -346,7 +348,7 @@ _bundle_out(osc_time_t timestamp, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
-	
+
 	osc_forge_bundle_pop(&handle->oforge, forge, handle->data.frame);
 }
 
@@ -357,11 +359,13 @@ _resolve(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	//TODO
 	*handle->state = STATE_READY;
-	handle->needs_flushing = 1;
 
+	sprintf(handle->osc_status, "resolved");
+
+	handle->needs_flushing = 1;
 	handle->url_updated = 1;
+	handle->status_updated = 1;
 
 	return 1;
 }
@@ -373,8 +377,11 @@ _timeout(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	//TODO
 	*handle->state = STATE_TIMEDOUT;
+
+	sprintf(handle->osc_status, "timed out");
+
+	handle->status_updated = 1;
 
 	return 1;
 }
@@ -386,6 +393,8 @@ _error(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
+	*handle->state = STATE_ERRORED;
+
 	const char *where;
 	const char *what;
 
@@ -393,10 +402,9 @@ _error(osc_time_t timestamp, const char *path, const char *fmt,
 	ptr = osc_get_string(ptr, &where);
 	ptr = osc_get_string(ptr, &what);
 
-	printf("_error: %s (%s)\n", where, what);
+	sprintf(handle->osc_status, "%s (%s)\n", where, what);
 
-	//FIXME
-	*handle->state = STATE_TIMEDOUT;
+	handle->status_updated = 1;
 
 	return 1;
 }
@@ -408,9 +416,12 @@ _connect(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	//TODO
 	*handle->state = STATE_CONNECTED;
+
+	sprintf(handle->osc_status, "connected");
+
 	handle->needs_flushing = 1;
+	handle->status_updated = 1;
 
 	return 1;
 }
@@ -422,8 +433,11 @@ _disconnect(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	//TODO
 	*handle->state = STATE_READY;
+
+	sprintf(handle->osc_status, "disconnected");
+
+	handle->status_updated = 1;
 
 	return 1;
 }
@@ -439,7 +453,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 
 	const osc_data_t *ptr = buf;
 
-	lv2_atom_forge_frame_time(forge, 0); //TODO
+	lv2_atom_forge_frame_time(forge, 0); //TODO syncronize time
 	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
 	for(const char *type = fmt; *type; type++)
@@ -517,7 +531,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 				osc_forge_bang(&handle->oforge, forge);
 				break;
 			}
-			
+
 			case 'c':
 			{
 				char c;
@@ -577,7 +591,7 @@ _unroll_bundle(const osc_data_t *buf, size_t size, void *data)
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	lv2_atom_forge_frame_time(forge, 0); //TODO
+	lv2_atom_forge_frame_time(forge, 0); //TODO synchronize time
 	osc_dispatch_method(OSC_IMMEDIATE, buf, size, methods,
 		_bundle_in, _bundle_out, handle);
 }
@@ -619,7 +633,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		free(handle);
 		return NULL;
 	}
-	
+
 	handle->uris.state_default = handle->map->map(handle->map->handle,
 		LV2_STATE__loadDefaultState);
 	handle->uris.subject = handle->map->map(handle->map->handle,
@@ -629,8 +643,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		ETEROJ_EVENT_URI);
 	handle->uris.eteroj_url = handle->map->map(handle->map->handle,
 		ETEROJ_URL_URI);
-	handle->uris.eteroj_err = handle->map->map(handle->map->handle,
-		ETEROJ_ERR_URI);
+	handle->uris.eteroj_stat = handle->map->map(handle->map->handle,
+		ETEROJ_STAT_URI);
 
 	handle->uris.log_note = handle->map->map(handle->map->handle,
 		LV2_LOG__Note);
@@ -638,7 +652,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		LV2_LOG__Error);
 	handle->uris.log_trace = handle->map->map(handle->map->handle,
 		LV2_LOG__Trace);
-	
+
 	handle->uris.patch_message = handle->map->map(handle->map->handle,
 		LV2_PATCH__Message);
 	handle->uris.patch_set = handle->map->map(handle->map->handle,
@@ -671,6 +685,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.free = _data_free;
 
 	strcpy(handle->osc_url, "osc.udp4://localhost:9090");
+	strcpy(handle->osc_status, "");
 
 	return handle;
 }
@@ -745,7 +760,7 @@ _recv(uint64_t timestamp, const char *path, const char *fmt,
 				case 'b':
 					ptr = osc_set_blob(ptr, end, itr->size, LV2_ATOM_BODY(itr));
 					break;
-				
+
 				case 'h':
 					ptr = osc_set_int64(ptr, end, ((const LV2_Atom_Long *)itr)->body);
 					break;
@@ -755,13 +770,13 @@ _recv(uint64_t timestamp, const char *path, const char *fmt,
 				case 't':
 					ptr = osc_set_timetag(ptr, end, ((const LV2_Atom_Long *)itr)->body);
 					break;
-				
+
 				case 'T':
 				case 'F':
 				case 'N':
 				case 'I':
 					break;
-				
+
 				case 'c':
 					ptr = osc_set_char(ptr, end, ((const LV2_Atom_Int *)itr)->body);
 					break;
@@ -777,7 +792,7 @@ _recv(uint64_t timestamp, const char *path, const char *fmt,
 			varchunk_write_advance(handle->data.to_worker, size);
 	}
 }
-	
+
 const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
 const char recv_msg [] = "/eteroj/recv\0\0\0\0,\0\0\0";
 
@@ -805,7 +820,7 @@ static void
 run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = instance;
-	
+
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
 	uint32_t capacity;
@@ -820,7 +835,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
-		
+
 		if(obj->atom.type == forge->Object)
 		{
 			if(obj->body.otype == handle->uris.patch_set)
@@ -828,7 +843,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 				const LV2_Atom_URID *subject = NULL;
 				const LV2_Atom_URID *property = NULL;
 				const LV2_Atom_String *value = NULL;
-				
+
 				LV2_Atom_Object_Query q[] = {
 					{ handle->uris.patch_subject, (const LV2_Atom **)&subject },
 					{ handle->uris.patch_property, (const LV2_Atom **)&property },
@@ -844,7 +859,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 					&& value && value->atom.size)
 				{
 					const char *new_url = LV2_ATOM_BODY_CONST(value);
-					printf("got URL patch set: %s\n", new_url);
 
 					_url_change(handle, new_url);
 				}
@@ -853,7 +867,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 			{
 				const LV2_Atom_URID *subject = NULL;
 				const LV2_Atom_URID *property = NULL;
-				
+
 				LV2_Atom_Object_Query q[] = {
 					{ handle->uris.patch_subject, (const LV2_Atom **)&subject },
 					{ handle->uris.patch_property, (const LV2_Atom **)&property },
@@ -865,19 +879,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 					continue; // subject not matching
 
 				if(property && (property->body == handle->uris.eteroj_url))
-				{
-					printf("got URL patch get:\n");
-					//TODO
-
 					handle->url_updated = 1;
-				}
-				else if(property && (property->body == handle->uris.eteroj_err))
-				{
-					printf("got ERR patch get:\n");
-					//TODO
-
-					handle->err_updated = 1;
-				}
+				else if(property && (property->body == handle->uris.eteroj_stat))
+					handle->status_updated = 1;
 			}
 			else
 				osc_atom_event_unroll(&handle->oforge, obj, _recv, handle);
@@ -885,7 +889,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	}
 	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
 		handle->needs_flushing = 1;
-	
+
 	// read incoming data
 	const osc_data_t *ptr;
 	size_t size;
@@ -926,11 +930,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 		handle->url_updated = 0;
 	}
-	
-	if(handle->err_updated)
-	{
-		const char *err_msg = "error";
 
+	if(handle->status_updated)
+	{
 		// create response
 		lv2_atom_forge_frame_time(forge, nsamples-1);
 		LV2_Atom_Forge_Frame obj_frame;
@@ -938,14 +940,14 @@ run(LV2_Handle instance, uint32_t nsamples)
 		lv2_atom_forge_key(forge, handle->uris.patch_subject);
 			lv2_atom_forge_urid(forge, handle->uris.subject);
 		lv2_atom_forge_key(forge, handle->uris.patch_property);
-			lv2_atom_forge_urid(forge, handle->uris.eteroj_err);
+			lv2_atom_forge_urid(forge, handle->uris.eteroj_stat);
 		lv2_atom_forge_key(forge, handle->uris.patch_value);
-			lv2_atom_forge_string(forge, err_msg, strlen(err_msg));
+			lv2_atom_forge_string(forge, handle->osc_status, strlen(handle->osc_status));
 		lv2_atom_forge_pop(forge, &obj_frame);
 
-		handle->err_updated = 0;
+		handle->status_updated = 0;
 	}
-	
+
 	lv2_atom_forge_pop(forge, &frame);
 
 	if(handle->restored)
@@ -986,7 +988,7 @@ extension_data(const char* uri)
 		return &state_iface;
 	else if(!strcmp(uri, LV2_WORKER__interface))
 		return &work_iface;
-		
+
 	return NULL;
 }
 
