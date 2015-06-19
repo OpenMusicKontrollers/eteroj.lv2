@@ -409,8 +409,11 @@ osc_forge_message_varlist(osc_forge_t *oforge, LV2_Atom_Forge *forge,
 					return 0;
 				break;
 			case 'm':
-				if(!(ref = osc_forge_midi(oforge, forge, va_arg(args, const uint8_t *))))
+				int32_t size = va_arg(args, int32_t);
+				const uint8_t *m = va_arg(args, const uint8_t *);
+				if(!(ref = osc_forge_midi(oforge, forge, size, m)))
 					return 0;
+				break;
 				break;
 			
 			case 'T':
