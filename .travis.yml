@@ -1,0 +1,17 @@
+language: c
+os: linux
+compiler:
+ - gcc
+ - clang
+before_install:
+ - wget http://lv2plug.in/spec/lv2-1.12.0.tar.bz2
+ - tar xjf lv2-1.12.0.tar.bz2
+ - wget https://github.com/libuv/libuv/archive/v1.6.1.tar.gz
+ - tar xzf v1.6.1.tar.gz
+install:
+ - pushd lv2-1.12.0 && ./waf configure --prefix=/usr && ./waf build && sudo ./waf install && popd
+ - pushd libuv-1.6.1 && sh autogen.sh && ./configure --prefix=/usr && make && sudo make install && popd
+before_script:
+ - mkdir build && pushd build && cmake .. && popd
+script:
+ - pushd build && make && sudo make install && popd

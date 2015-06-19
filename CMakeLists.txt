@@ -10,7 +10,7 @@ include_directories(${PROJECT_SOURCE_DIR}/eo_ui.lv2)
 include_directories(${PROJECT_SOURCE_DIR}/varchunk)
 include_directories(${PROJECT_BINARY_DIR})
 
-set(CMAKE_C_FALGS "-std=gnu99 ${CMAKE_C_FLAGS}")
+set(CMAKE_C_FLAGS "-std=gnu99 ${CMAKE_C_FLAGS}")
 add_definitions("-D_GNU_SOURCE=1") # asprintf
 
 set(ETEROJ_VERSION "0.1.0_alpha")
