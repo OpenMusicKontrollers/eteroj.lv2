@@ -529,7 +529,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			{
 				const uint8_t *m;
 				ptr = osc_get_midi(ptr, &m);
-				osc_forge_midi(&handle->oforge, forge, m);
+				osc_forge_midi(&handle->oforge, forge, 4, m);
 				break;
 			}
 		}
