@@ -24,11 +24,17 @@ extern "C" {
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <uv.h>
 
 /*****************************************************************************
  * API START
  *****************************************************************************/
+
+// if you need bigger buffers, predefine size before including this header
+#ifndef OSC_STREAM_BUF_SIZE
+#	define OSC_STREAM_BUF_SIZE 2048
+#endif
 
 typedef struct _osc_stream_t osc_stream_t;
 typedef struct _osc_stream_driver_t osc_stream_driver_t;
@@ -67,25 +73,22 @@ osc_stream_flush(osc_stream_t *stream);
  * private
  *****************************************************************************/
 
-#ifndef OSC_STREAM_BUF_SIZE
-#	define OSC_STREAM_BUF_SIZE 2048 //TODO how big?
-#endif
-
 typedef enum _osc_stream_type_t osc_stream_type_t;
 typedef enum _osc_stream_ip_version_t osc_stream_ip_version_t;
 
 typedef struct _osc_stream_udp_t osc_stream_udp_t;
 typedef struct _osc_stream_udp_tx_t osc_stream_udp_tx_t;
+typedef struct _osc_stream_duplex_t osc_stream_duplex_t;
 typedef struct _osc_stream_tcp_t osc_stream_tcp_t;
 typedef struct _osc_stream_tcp_tx_t osc_stream_tcp_tx_t;
-typedef struct _osc_stream_pipe_t osc_stream_pipe_t;
+typedef struct _osc_stream_ser_t osc_stream_ser_t;
 
 typedef union _osc_stream_addr_t osc_stream_addr_t;
 
 enum _osc_stream_type_t {
 	OSC_STREAM_TYPE_UDP,
 	OSC_STREAM_TYPE_TCP,
-	OSC_STREAM_TYPE_PIPE
+	OSC_STREAM_TYPE_SERIAL
 };
 
 enum _osc_stream_ip_version_t {
@@ -113,6 +116,14 @@ struct _osc_stream_udp_t {
 	osc_stream_udp_tx_t tx;
 };
 
+struct _osc_stream_duplex_t {
+	size_t nchunk;
+	int32_t prefix;
+	uv_buf_t msg[2];
+	char buf_rx [OSC_STREAM_BUF_SIZE];
+	char buf_tx [OSC_STREAM_BUF_SIZE];
+};
+
 struct _osc_stream_tcp_tx_t {
 	uv_tcp_t socket;
 	uv_write_t req;
@@ -126,7 +137,6 @@ struct _osc_stream_tcp_t {
 
 	int connected;
 	osc_stream_tcp_tx_t tx;
-	size_t nchunk;
 
 	// responder only
 	uv_tcp_t socket;
@@ -134,20 +144,17 @@ struct _osc_stream_tcp_t {
 	//sender only
 	uv_connect_t conn;
 
-	int32_t prefix;
-	uv_buf_t msg[2];
-	char buf_rx [OSC_STREAM_BUF_SIZE];
-	char buf_tx [OSC_STREAM_BUF_SIZE];
+	osc_stream_duplex_t duplex;
 };
 
-struct _osc_stream_pipe_t {
+struct _osc_stream_ser_t {
+	int slip;
 	uv_pipe_t socket;
 	uv_write_t req;
 	uv_buf_t msg;
 	int fd;
-	size_t nchunk;
-	char buf_rx [OSC_STREAM_BUF_SIZE];
-	char buf_tx [OSC_STREAM_BUF_SIZE];
+
+	osc_stream_duplex_t duplex;
 };
 
 struct _osc_stream_t {
@@ -159,7 +166,7 @@ struct _osc_stream_t {
 	union {
 		osc_stream_udp_t udp;
 		osc_stream_tcp_t tcp;
-		osc_stream_pipe_t pipe;
+		osc_stream_ser_t ser;
 	};
 };
 
@@ -438,7 +445,7 @@ _getaddrinfo_udp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				if((err = uv_ip6_addr("::", 0, &src.ip6)))
 					goto fail;
 
-				flags |= UV_UDP_IPV6ONLY; //TODO make this configurable?
+				flags |= UV_UDP_IPV6ONLY;
 
 				break;
 			}
@@ -511,7 +518,7 @@ _getaddrinfo_udp_rx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				if((err = uv_ip6_addr("::", ntohs(ptr6->sin6_port), &src.ip6)))
 					goto fail;
 
-				flags |= UV_UDP_IPV6ONLY; //TODO make this configurable?
+				flags |= UV_UDP_IPV6ONLY;
 
 				break;
 			}
@@ -574,7 +581,10 @@ _udp_flush(osc_stream_t *stream)
 		return;
 
 	if(!uv_is_active((uv_handle_t *)&udp->socket))
-		return; //TODO
+	{
+		_instant_err(stream, "_udp_flush", UV_EAGAIN);
+		return;
+	}
 
 	uv_buf_t *msg = &udp->tx.msg;
 	msg->base = (char *)driver->send_req(&msg->len, stream->data);
@@ -621,6 +631,92 @@ _udp_free(osc_stream_t *stream)
 }
 
 /*****************************************************************************
+ * Dual implementation
+ *****************************************************************************/
+
+static inline void
+_duplex_prefix_alloc(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
+	size_t suggested_size, uv_buf_t *buf)
+{
+	const osc_stream_driver_t *driver = stream->driver;
+
+	if(suggested_size > OSC_STREAM_BUF_SIZE)
+		suggested_size = OSC_STREAM_BUF_SIZE;
+
+	if(duplex->nchunk == sizeof(int32_t))
+	{
+		buf->base = (char *)&duplex->prefix;
+		buf->len = duplex->nchunk;
+	}
+	else
+	{
+		buf->base = driver->recv_req(suggested_size, stream->data);
+		buf->len = buf->base ? suggested_size : 0;
+	}
+}
+
+static inline void
+_duplex_prefix_recv_cb(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
+	ssize_t nread, const uv_buf_t *buf)
+{
+	const osc_stream_driver_t *driver = stream->driver;
+
+	if(nread == sizeof(int32_t))
+	{
+		duplex->nchunk = ntohl(*(int32_t *)buf->base);
+	}
+	else if(nread == duplex->nchunk)
+	{
+		driver->recv_adv(nread, stream->data);
+		duplex->nchunk = sizeof(int32_t);
+	}
+	else // nread != sizeof(int32_t) && nread != nchunk
+		duplex->nchunk = sizeof(int32_t);
+}
+
+static inline void
+_duplex_slip_alloc(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
+	size_t suggested_size, uv_buf_t *buf)
+{
+	const osc_stream_driver_t *driver = stream->driver;
+
+	buf->base = duplex->buf_rx;
+	buf->base += duplex->nchunk; // is there remaining chunk from last call?
+	buf->len = OSC_STREAM_BUF_SIZE - duplex->nchunk;
+}
+
+static inline void
+_duplex_slip_recv_cb(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
+	ssize_t nread, const uv_buf_t *buf)
+{
+	const osc_stream_driver_t *driver = stream->driver;
+	
+	char *ptr = duplex->buf_rx;
+	nread += duplex->nchunk; // is there remaining chunk from last call?
+	size_t size;
+	size_t parsed;
+	while( (parsed = slip_decode(ptr, nread, &size)) && (nread > 0) )
+	{
+		void *tar;
+		if((tar = driver->recv_req(size, stream->data)))
+		{
+			memcpy(tar, ptr, size);
+			driver->recv_adv(size, stream->data);
+		}
+		ptr += parsed;
+		nread -= parsed;
+	}
+
+	if(nread > 0) // is there remaining chunk for next call?
+	{
+		memmove(duplex->buf_rx, ptr, nread);
+		duplex->nchunk = nread;
+	}
+	else
+		duplex->nchunk = 0;
+}
+
+/*****************************************************************************
  * TCP implementation
  *****************************************************************************/
 
@@ -639,45 +735,23 @@ _tcp_prefix_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 {
 	uv_tcp_t *socket = (uv_tcp_t *)handle;
 	osc_stream_tcp_t *tcp = socket->data;
+	osc_stream_duplex_t *duplex = &tcp->duplex;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 
-	if(suggested_size > OSC_STREAM_BUF_SIZE)
-		suggested_size = OSC_STREAM_BUF_SIZE;
-
-	if(tcp->nchunk == sizeof(int32_t))
-	{
-		buf->base = (char *)&tcp->prefix;
-		buf->len = tcp->nchunk;
-	}
-	else
-	{
-		buf->base = driver->recv_req(suggested_size, stream->data);
-		buf->len = buf->base ? suggested_size : 0;
-	}
+	_duplex_prefix_alloc(stream, duplex, suggested_size, buf);
 }
 
 static inline void
 _tcp_prefix_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
 {
 	osc_stream_tcp_t *tcp = socket->data;
+	osc_stream_duplex_t *duplex = &tcp->duplex;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 	osc_stream_tcp_tx_t *tx = (void *)socket - offsetof(osc_stream_tcp_tx_t, socket);
 
 	if(nread > 0)
 	{
-		if(nread == sizeof(int32_t))
-		{
-			tcp->nchunk = ntohl(*(int32_t *)buf->base);
-		}
-		else if(nread == tcp->nchunk)
-		{
-			driver->recv_adv(nread, stream->data);
-			tcp->nchunk = sizeof(int32_t);
-		}
-		else // nread != sizeof(int32_t) && nread != nchunk
-			tcp->nchunk = sizeof(int32_t);
+		_duplex_prefix_recv_cb(stream, duplex, nread, buf);
 	}
 	else if (nread < 0)
 	{
@@ -691,7 +765,6 @@ _tcp_prefix_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
 			_instant_err(stream, "_tcp_prefix_recv_cb", err);
 		uv_close((uv_handle_t *)socket, _tcp_close_done);
 		uv_cancel((uv_req_t *)&tx->req);
-
 		//TODO try to reconnect?
 	}
 }
@@ -701,46 +774,23 @@ _tcp_slip_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 {
 	uv_tcp_t *socket = (uv_tcp_t *)handle;
 	osc_stream_tcp_t *tcp = socket->data;
+	osc_stream_duplex_t *duplex = &tcp->duplex;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 
-	buf->base = tcp->buf_rx;
-	buf->base += tcp->nchunk; // is there remaining chunk from last call?
-	buf->len = OSC_STREAM_BUF_SIZE - tcp->nchunk;
+	_duplex_slip_alloc(stream, duplex, suggested_size, buf);
 }
 
 static inline void
 _tcp_slip_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
 {
 	osc_stream_tcp_t *tcp = socket->data;
+	osc_stream_duplex_t *duplex = &tcp->duplex;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 	osc_stream_tcp_tx_t *tx = (void *)socket - offsetof(osc_stream_tcp_tx_t, socket);
 	
 	if(nread > 0)
 	{
-		char *ptr = tcp->buf_rx;
-		nread += tcp->nchunk; // is there remaining chunk from last call?
-		size_t size;
-		size_t parsed;
-		while( (parsed = slip_decode(ptr, nread, &size)) && (nread > 0) )
-		{
-			void *tar;
-			if((tar = driver->recv_req(size, stream->data)))
-			{
-				memcpy(tar, ptr, size);
-				driver->recv_adv(size, stream->data);
-			}
-			ptr += parsed;
-			nread -= parsed;
-		}
-		if(nread > 0) // is there remaining chunk for next call?
-		{
-			memmove(tcp->buf_rx, ptr, nread);
-			tcp->nchunk = nread;
-		}
-		else
-			tcp->nchunk = 0;
+		_duplex_slip_recv_cb(stream, duplex, nread, buf);
 	}
 	else if (nread < 0)
 	{
@@ -754,6 +804,7 @@ _tcp_slip_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
 			_instant_err(stream, "_tcp_slip_recv_cb", err);
 		uv_close((uv_handle_t *)socket, _tcp_close_done);
 		uv_cancel((uv_req_t *)&tx->req);
+		//TODO try to reconnect?
 	}
 }
 
@@ -776,13 +827,13 @@ _sender_connect(uv_connect_t *conn, int status)
 
 	if(!tcp->slip)
 	{
-		tcp->nchunk = sizeof(int32_t); // packet size as TCP preamble
+		tcp->duplex.nchunk = sizeof(int32_t); // packet size as TCP preamble
 		if((err = uv_read_start((uv_stream_t *)&tx->socket, _tcp_prefix_alloc, _tcp_prefix_recv_cb)))
 			goto fail;
 	}
 	else // tcp->slip
 	{
-		tcp->nchunk = 0;
+		tcp->duplex.nchunk = 0;
 		if((err = uv_read_start((uv_stream_t *)&tx->socket, _tcp_slip_alloc, _tcp_slip_recv_cb)))
 			goto fail;
 	}
@@ -920,13 +971,13 @@ _responder_connect(uv_stream_t *socket, int status)
 
 		if(!tcp->slip)
 		{
-			tcp->nchunk = sizeof(int32_t); // packet size as TCP preamble
+			tcp->duplex.nchunk = sizeof(int32_t); // packet size as TCP preamble
 			if((err = uv_read_start((uv_stream_t *)&tx->socket, _tcp_prefix_alloc, _tcp_prefix_recv_cb)))
 				goto fail;
 		}
 		else // tcp->slip
 		{
-			tcp->nchunk = 0;
+			tcp->duplex.nchunk = 0;
 			if((err = uv_read_start((uv_stream_t *)&tx->socket, _tcp_slip_alloc, _tcp_slip_recv_cb)))
 				goto fail;
 		}
@@ -985,7 +1036,7 @@ _getaddrinfo_tcp_rx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				if((err = uv_ip6_addr(remote, ntohs(ptr6->sin6_port), &addr.ip6)))
 					goto fail;
 
-				flags |= UV_TCP_IPV6ONLY; //TODO make this configurable
+				flags |= UV_TCP_IPV6ONLY;
 
 				break;
 			}
@@ -1019,7 +1070,7 @@ _tcp_flush(osc_stream_t *stream);
 static inline void
 _tcp_send_cb(uv_write_t *req, int status)
 {
-	osc_stream_tcp_t *tcp = req->data;
+	osc_stream_ser_t *tcp = req->data;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
 	const osc_stream_driver_t *driver = stream->driver;
 
@@ -1045,22 +1096,25 @@ _tcp_flush(osc_stream_t *stream)
 		return;
 
 	if(!uv_is_active((uv_handle_t *)&tx->socket))
-		return; //TODO
+	{
+		_instant_err(stream, "_tcp_flush", UV_EAGAIN);
+		return;
+	}
 
-	uv_buf_t *msg = tcp->msg;
+	uv_buf_t *msg = tcp->duplex.msg;
 
 	msg[1].base = (char *)driver->send_req(&msg[1].len, stream->data);
 
 	if(msg[1].base && (msg[1].len > 0) )
 	{
-		tcp->prefix = htobe32(msg[1].len);
-		msg[0].base = (char *)&tcp->prefix;
+		tcp->duplex.prefix = htobe32(msg[1].len);
+		msg[0].base = (char *)&tcp->duplex.prefix;
 		msg[0].len = sizeof(int32_t);
 
 		if(tcp->slip)
 		{
-			msg[1].len = slip_encode(tcp->buf_tx, &msg[1], 1); // discard prefix size
-			msg[1].base = tcp->buf_tx;
+			msg[1].len = slip_encode(tcp->duplex.buf_tx, &msg[1], 1); // discard prefix size
+			msg[1].base = tcp->duplex.buf_tx;
 		}
 
 		int err;
@@ -1153,171 +1207,200 @@ _tcp_free(osc_stream_t *stream)
  *****************************************************************************/
 
 static inline void
-_pipe_slip_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
+_ser_prefix_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 {
 	uv_pipe_t *socket = (uv_pipe_t *)handle;
-	osc_stream_pipe_t *pipe = (void *)socket - offsetof(osc_stream_pipe_t, socket);
-	osc_stream_t *stream = (void *)pipe - offsetof(osc_stream_t, pipe);
-	const osc_stream_driver_t *driver = stream->driver;
+	osc_stream_ser_t *ser = (void *)socket - offsetof(osc_stream_ser_t, socket);
+	osc_stream_duplex_t *duplex = &ser->duplex;
+	osc_stream_t *stream = (void *)ser - offsetof(osc_stream_t, ser);
 
-	buf->base = pipe->buf_rx;
-	buf->base += pipe->nchunk; // is there remaining chunk from last call?
-	buf->len = OSC_STREAM_BUF_SIZE - pipe->nchunk;
+	_duplex_prefix_alloc(stream, duplex, suggested_size, buf);
 }
 
 static inline void
-_pipe_slip_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
+_ser_prefix_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
 {
-	osc_stream_pipe_t *pipe = (void *)socket - offsetof(osc_stream_pipe_t, socket);
-	osc_stream_t *stream = (void *)pipe - offsetof(osc_stream_t, pipe);
-	const osc_stream_driver_t *driver = stream->driver;
+	osc_stream_ser_t *ser = (void *)socket - offsetof(osc_stream_ser_t, socket);
+	osc_stream_duplex_t *duplex = &ser->duplex;
+	osc_stream_t *stream = (void *)ser - offsetof(osc_stream_t, ser);
 
 	if(nread > 0)
 	{
-		char *ptr = pipe->buf_rx;
-		nread += pipe->nchunk; // is there remaining chunk from last call?
-		size_t size;
-		size_t parsed;
-		while( (parsed = slip_decode(ptr, nread, &size)) && (nread > 0) )
-		{
-			void *tar;
-			if((tar = driver->recv_req(size, stream->data)))
-			{
-				memcpy(tar, ptr, size);
-				driver->recv_adv(size, stream->data);
-			}
-			ptr += parsed;
-			nread -= parsed;
-		}
-		if(nread > 0) // is there remaining chunk for next call?
-		{
-			memmove(pipe->buf_rx, ptr, nread);
-			pipe->nchunk = nread;
-		}
-		else
-			pipe->nchunk = 0;
+		_duplex_prefix_recv_cb(stream, duplex, nread, buf);
 	}
 	else if (nread < 0)
 	{
 		if(nread == UV_EOF)
 			_instant_msg(stream, OSC_STREAM_MESSAGE_DISCONNECT);
 		else
-			_instant_err(stream, "_pipe_slip_recv_cb", nread);
+			_instant_err(stream, "_ser_slip_recv_cb", nread);
 
 		int err;
 		if((err = uv_read_stop(socket)))
-			_instant_err(stream, "_pipe_slip_recv_cb", err);
+			_instant_err(stream, "_ser_slip_recv_cb", err);
 		//uv_close((uv_handle_t *)socket, NULL); //TODO
 	}
 }
 
 static inline void
-_pipe_init(uv_loop_t *loop, osc_stream_t *stream, int fd)
+_ser_slip_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 {
-	osc_stream_pipe_t *pipe = &stream->pipe;
+	uv_pipe_t *socket = (uv_pipe_t *)handle;
+	osc_stream_ser_t *ser = (void *)socket - offsetof(osc_stream_ser_t, socket);
+	osc_stream_duplex_t *duplex = &ser->duplex;
+	osc_stream_t *stream = (void *)ser - offsetof(osc_stream_t, ser);
+
+	_duplex_slip_alloc(stream, duplex, suggested_size, buf);
+}
+
+static inline void
+_ser_slip_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
+{
+	osc_stream_ser_t *ser = (void *)socket - offsetof(osc_stream_ser_t, socket);
+	osc_stream_duplex_t *duplex = &ser->duplex;
+	osc_stream_t *stream = (void *)ser - offsetof(osc_stream_t, ser);
+
+	if(nread > 0)
+	{
+		_duplex_slip_recv_cb(stream, duplex, nread, buf);
+	}
+	else if (nread < 0)
+	{
+		if(nread == UV_EOF)
+			_instant_msg(stream, OSC_STREAM_MESSAGE_DISCONNECT);
+		else
+			_instant_err(stream, "_ser_slip_recv_cb", nread);
+
+		int err;
+		if((err = uv_read_stop(socket)))
+			_instant_err(stream, "_ser_slip_recv_cb", err);
+		//uv_close((uv_handle_t *)socket, NULL); //TODO
+	}
+}
+
+static inline void
+_ser_init(uv_loop_t *loop, osc_stream_t *stream, int fd)
+{
+	osc_stream_ser_t *ser = &stream->ser;
 	const osc_stream_driver_t *driver = stream->driver;
-	pipe->nchunk = 0;
-	pipe->fd = 0;
+	ser->duplex.nchunk = 0;
+	ser->fd = fd;
 
 	int err;
-	if((err = uv_pipe_init(loop, &pipe->socket, 0)))
+	if((err = uv_pipe_init(loop, &ser->socket, 0)))
 		goto fail;
-	if((err = uv_pipe_open(&pipe->socket, pipe->fd)))
+	if((err = uv_pipe_open(&ser->socket, ser->fd)))
 		goto fail;
-	if((err = uv_read_start((uv_stream_t *)&pipe->socket, _pipe_slip_alloc, _pipe_slip_recv_cb)))
-		goto fail;
+	if(!ser->slip)
+	{
+		ser->duplex.nchunk = sizeof(int32_t); // packet size as TCP preamble
+		if((err = uv_read_start((uv_stream_t *)&ser->socket, _ser_prefix_alloc, _ser_prefix_recv_cb)))
+			goto fail;
+	}
+	else // ser->slip
+	{
+		ser->duplex.nchunk = 0;
+		if((err = uv_read_start((uv_stream_t *)&ser->socket, _ser_slip_alloc, _ser_slip_recv_cb)))
+			goto fail;
+	}
 			
 	_instant_msg(stream, OSC_STREAM_MESSAGE_CONNECT);
 
 	return;
 
 fail:
-	_instant_err(stream, "_pipe_init", err);
+	_instant_err(stream, "_ser_init", err);
 }
 
 static inline void
-_pipe_flush(osc_stream_t *stream);
+_ser_flush(osc_stream_t *stream);
 
 static inline void
-_pipe_send_cb(uv_write_t *req, int status)
+_ser_send_cb(uv_write_t *req, int status)
 {
-	osc_stream_pipe_t *pipe = (void *)req - offsetof(osc_stream_pipe_t, req);
-	osc_stream_t *stream = (void *)pipe - offsetof(osc_stream_t, pipe);
+	osc_stream_ser_t *ser = (void *)req - offsetof(osc_stream_ser_t, req);
+	osc_stream_t *stream = (void *)ser - offsetof(osc_stream_t, ser);
 	const osc_stream_driver_t *driver = stream->driver;
 
 	if(!status)
 	{
+		driver->send_adv(stream->data);
+
 		stream->flushing = 0; // reset flushing flag
-		_pipe_flush(stream); // look for more data to flush
+		_ser_flush(stream); // look for more data to flush
 	}
 	else
-		_instant_err(stream, "_pipe_send_cb", status);
+		_instant_err(stream, "_ser_send_cb", status);
 }
 
 static inline void
-_pipe_flush(osc_stream_t *stream)
+_ser_flush(osc_stream_t *stream)
 {
-	osc_stream_pipe_t *pipe = &stream->pipe;
+	osc_stream_ser_t *ser = &stream->ser;
 	const osc_stream_driver_t *driver = stream->driver;
 
 	if(stream->flushing) // already flushing?
 		return;
 
-	if(!uv_is_active((uv_handle_t *)&pipe->socket))
-		return; //TODO
-
-	uv_buf_t src = {
-		.base = NULL,
-		.len = 0
-	};
-
-	src.base = (char *)driver->send_req(&src.len, stream->data);
-
-	if(src.base && (src.len > 0))
+	if(!uv_is_active((uv_handle_t *)&ser->socket))
 	{
-		stream->flushing = 1; // set flushing flag
+		_instant_err(stream, "_ser_flush", UV_EAGAIN);
+		return;
+	}
 
-		// slip encode it to temporary buffer
-		uv_buf_t *msg = &pipe->msg;
-		msg->base = pipe->buf_tx;
-		msg->len = slip_encode(msg->base, &src, 1);
-	
-		driver->send_adv(stream->data);
+	uv_buf_t *msg = ser->duplex.msg;
+
+	msg[1].base = (char *)driver->send_req(&msg[1].len, stream->data);
+
+	if(msg[1].base && (msg[1].len > 0) )
+	{
+		ser->duplex.prefix = htobe32(msg[1].len);
+		msg[0].base = (char *)&ser->duplex.prefix;
+		msg[0].len = sizeof(int32_t);
+
+		if(ser->slip)
+		{
+			msg[1].len = slip_encode(ser->duplex.buf_tx, &msg[1], 1); // discard prefix size
+			msg[1].base = ser->duplex.buf_tx;
+		}
 
 		int err;
-		if((err =	uv_write(&pipe->req, (uv_stream_t *)&pipe->socket, msg, 1, _pipe_send_cb)))
+		stream->flushing = 1; // set flushing flag
+
+		if((err = uv_write(&ser->req, (uv_stream_t *)&ser->socket, &msg[ser->slip], 2-ser->slip, _ser_send_cb)))
 		{
-			_instant_err(stream, "_pipe_flush", err);
+			_instant_err(stream, "_ser_flush", err);
 			stream->flushing = 0;
 		}
 	}
 }
 
 static inline void
-_pipe_close_cb(uv_handle_t *handle)
+_ser_close_cb(uv_handle_t *handle)
 {
 	uv_stream_t *socket = (uv_stream_t *)handle;
-	osc_stream_pipe_t *pipe = (void *)socket - offsetof(osc_stream_pipe_t, socket);
-	osc_stream_t *stream = (void *)pipe - offsetof(osc_stream_t, pipe);
+	osc_stream_ser_t *ser = (void *)socket - offsetof(osc_stream_ser_t, socket);
+	osc_stream_t *stream = (void *)ser - offsetof(osc_stream_t, ser);
 
 	stream->driver->free(stream->data);
 	free(stream);
 }
 
 static inline void
-_pipe_free(osc_stream_t *stream)
+_ser_free(osc_stream_t *stream)
 {
 	int err;
-	osc_stream_pipe_t *pipe = &stream->pipe;
+	osc_stream_ser_t *ser = &stream->ser;
 
-	if(uv_is_active((uv_handle_t *)&pipe->socket))
+	if(uv_is_active((uv_handle_t *)&ser->socket))
 	{
-		if((err = uv_read_stop((uv_stream_t *)&pipe->socket)))
-			_instant_err(stream, "_pipe_free", err);
+		if((err = uv_read_stop((uv_stream_t *)&ser->socket)))
+			_instant_err(stream, "_ser_free", err);
 	}
-	uv_close((uv_handle_t *)&pipe->socket, _pipe_close_cb);
+	uv_close((uv_handle_t *)&ser->socket, _ser_close_cb);
 
-	//TODO close(pipe->fd)?
+	if(ser->fd)
+		close(ser->fd);
 }
 
 /*****************************************************************************
@@ -1401,10 +1484,19 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 		else
 			return UV_EPROTO;
 	}
-	else if(!strncmp(addr, "osc.pipe://", 11))
+	else if(!strncmp(addr, "osc.serial://", 13))
 	{
-		stream->type = OSC_STREAM_TYPE_PIPE;
-		addr += 11;
+		addr += 13;
+
+		stream->type = OSC_STREAM_TYPE_SERIAL;
+		stream->ser.slip = 0;
+	}
+	else if(!strncmp(addr, "osc.slip.serial://", 18))
+	{
+		addr += 18;
+		
+		stream->type = OSC_STREAM_TYPE_SERIAL;
+		stream->ser.slip = 1;
 	}
 	else
 		return UV_EPROTO;
@@ -1503,7 +1595,7 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 
 			break;
 		}
-		case OSC_STREAM_TYPE_PIPE:
+		case OSC_STREAM_TYPE_SERIAL:
 		{
 			// check if file exists
 			uv_fs_t req;
@@ -1512,9 +1604,6 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 			{
 				return UV_ENXIO;
 			}
-			
-			//TODO
-			// check if file can be used as pipe
 		
 			int fd;
 #if defined(__WINDOWS__)
@@ -1526,13 +1615,15 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 				return UV_ENXIO;
 			}
 
+			// check if file can be used as serial device
 			uv_handle_type type = uv_guess_handle(fd);
 			if( (type != UV_NAMED_PIPE) && (type != UV_STREAM) && (type != UV_TTY))
 			{
+				close(fd);
 				return UV_ENXIO;
 			}
 
-			_pipe_init(loop, stream, fd);
+			_ser_init(loop, stream, fd);
 
 			break;
 		}
@@ -1549,7 +1640,9 @@ osc_stream_new(uv_loop_t *loop, const char *addr,
 		|| !driver->send_req || !driver->send_adv
 		|| !driver->recv_req || !driver->recv_adv
 		|| !driver->free )
+	{
 		return NULL;
+	}
 
 	int err;
 	osc_stream_t *stream = calloc(1, sizeof(osc_stream_t));
@@ -1595,8 +1688,8 @@ osc_stream_free(osc_stream_t *stream)
 		case OSC_STREAM_TYPE_TCP:
 			_tcp_free(stream);
 			break;
-		case OSC_STREAM_TYPE_PIPE:
-			_pipe_free(stream);
+		case OSC_STREAM_TYPE_SERIAL:
+			_ser_free(stream);
 			break;
 	}
 }
@@ -1615,8 +1708,8 @@ osc_stream_flush(osc_stream_t *stream)
 		case OSC_STREAM_TYPE_TCP:
 			_tcp_flush(stream);
 			break;
-		case OSC_STREAM_TYPE_PIPE:
-			_pipe_flush(stream);
+		case OSC_STREAM_TYPE_SERIAL:
+			_ser_flush(stream);
 			break;
 	}
 }

@@ -2,6 +2,8 @@
 
 ## Tiny fast OSC (Open Sound Control) stream C library
 
-- IPv4 UDP, TCP (prefix, SLIP)
-- IPv6 UDP, TCP (prefix, SLIP)
-- serial (SLIP)
+- IPv4 UDP
+- IPv6 UDP
+- IPv4 TCP (framing: prefix, SLIP)
+- IPv6 TCP (frameing: prefix, SLIP)
+- Serial (framing: prefix, SLIP)
