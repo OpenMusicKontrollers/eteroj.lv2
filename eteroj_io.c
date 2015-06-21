@@ -718,8 +718,7 @@ activate(LV2_Handle instance)
 
 	uv_loop_init(&handle->loop);
 
-	handle->data.stream = osc_stream_new(&handle->loop, handle->osc_url,
-		&handle->data.driver, handle);
+	handle->restored = 1;
 }
 
 // rt-thread
