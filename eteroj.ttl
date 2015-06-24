@@ -68,8 +68,6 @@ eteroj:io
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	patch:writable eteroj:url ;
-	patch:readable eteroj:url ;
-	
 	patch:readable eteroj:status ;
 
 	lv2:port [

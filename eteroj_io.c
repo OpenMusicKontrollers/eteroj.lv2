@@ -512,23 +512,10 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			}
 
 			case 'T':
-			{
-				osc_forge_true(&handle->oforge, forge);
-				break;
-			}
 			case 'F':
-			{
-				osc_forge_false(&handle->oforge, forge);
-				break;
-			}
 			case 'N':
-			{
-				osc_forge_nil(&handle->oforge, forge);
-				break;
-			}
 			case 'I':
 			{
-				osc_forge_bang(&handle->oforge, forge);
 				break;
 			}
 
@@ -543,7 +530,7 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			{
 				const uint8_t *m;
 				ptr = osc_get_midi(ptr, &m);
-				osc_forge_midi(&handle->oforge, forge, 4, m);
+				osc_forge_midi(&handle->oforge, forge, 3, m + 1); // skip port byte
 				break;
 			}
 		}
@@ -747,41 +734,68 @@ _recv(uint64_t timestamp, const char *path, const char *fmt,
 			switch(*type)
 			{
 				case 'i':
+				{
 					ptr = osc_set_int32(ptr, end, ((const LV2_Atom_Int *)itr)->body);
 					break;
+				}
 				case 'f':
+				{
 					ptr = osc_set_float(ptr, end, ((const LV2_Atom_Float *)itr)->body);
 					break;
+				}
 				case 's':
 				case 'S':
+				{
 					ptr = osc_set_string(ptr, end, LV2_ATOM_BODY_CONST(itr));
 					break;
+				}
 				case 'b':
+				{
 					ptr = osc_set_blob(ptr, end, itr->size, LV2_ATOM_BODY(itr));
 					break;
+				}
 
 				case 'h':
+				{
 					ptr = osc_set_int64(ptr, end, ((const LV2_Atom_Long *)itr)->body);
 					break;
+				}
 				case 'd':
+				{
 					ptr = osc_set_double(ptr, end, ((const LV2_Atom_Double *)itr)->body);
 					break;
+				}
 				case 't':
+				{
 					ptr = osc_set_timetag(ptr, end, ((const LV2_Atom_Long *)itr)->body);
 					break;
+				}
 
 				case 'T':
 				case 'F':
 				case 'N':
 				case 'I':
+				{
 					break;
+				}
 
 				case 'c':
+				{
 					ptr = osc_set_char(ptr, end, ((const LV2_Atom_Int *)itr)->body);
 					break;
+				}
 				case 'm':
-					ptr = osc_set_midi(ptr, end, LV2_ATOM_BODY(itr));
+				{
+					const uint8_t *src = LV2_ATOM_BODY_CONST(itr);
+					const uint8_t dst [4] = {
+						0x00, // port byte
+						itr->size >= 1 ? src[0] : 0x00,
+						itr->size >= 2 ? src[1] : 0x00,
+						itr->size >= 3 ? src[2] : 0x00
+					};
+					ptr = osc_set_midi(ptr, end, dst);
 					break;
+				}
 			}
 		}
 
