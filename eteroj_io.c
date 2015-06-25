@@ -90,7 +90,8 @@ struct _plughandle_t {
 		osc_stream_t *stream;
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
-		LV2_Atom_Forge_Frame frame [2];
+		int frame_cnt;
+		LV2_Atom_Forge_Frame frame [32][2]; // 32 nested bundles should be enough
 	} data;
 };
 
@@ -339,7 +340,8 @@ _bundle_in(osc_time_t timestamp, void *data)
 	LV2_Atom_Forge *forge = &handle->forge;
 
 	//TODO check return
-	osc_forge_bundle_push(&handle->oforge, forge, handle->data.frame, timestamp);
+	osc_forge_bundle_push(&handle->oforge, forge,
+		handle->data.frame[handle->data.frame_cnt++], timestamp);
 }
 
 // rt
@@ -349,7 +351,8 @@ _bundle_out(osc_time_t timestamp, void *data)
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	osc_forge_bundle_pop(&handle->oforge, forge, handle->data.frame);
+	osc_forge_bundle_pop(&handle->oforge, forge,
+		handle->data.frame[--handle->data.frame_cnt]);
 }
 
 // rt
@@ -453,7 +456,8 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 
 	const osc_data_t *ptr = buf;
 
-	lv2_atom_forge_frame_time(forge, 0); //TODO syncronize time
+	if(handle->data.frame_cnt == 0)
+		lv2_atom_forge_frame_time(forge, 0); //TODO syncronize time
 	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
 	for(const char *type = fmt; *type; type++)
