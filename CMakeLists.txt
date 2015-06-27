@@ -12,7 +12,10 @@ include_directories(${PROJECT_BINARY_DIR})
 set(CMAKE_C_FLAGS "-std=gnu99 ${CMAKE_C_FLAGS}")
 add_definitions("-D_GNU_SOURCE=1") # asprintf
 
-set(ETEROJ_VERSION "0.1.0_alpha")
+set(ETEROJ_MAJOR_VERSION 0)
+set(ETEROJ_MINOR_VERSION 1)
+set(ETEROJ_MICRO_VERSION 0)
+set(ETEROJ_VERSION "${ETEROJ_MAJOR_VERSION}.${ETEROJ_MINOR_VERSION}.${ETEROJ_MICRO_VERSION}")
 add_definitions("-DETEROJ_VERSION=\"${ETEROJ_VERSION}\"")
 
 set(DEST lib/lv2/eteroj.lv2)
