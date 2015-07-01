@@ -92,6 +92,12 @@ struct _plughandle_t {
 		varchunk_t *to_worker;
 		int frame_cnt;
 		LV2_Atom_Forge_Frame frame [32][2]; // 32 nested bundles should be enough
+		
+		osc_data_t *buf;
+		osc_data_t *ptr;
+		osc_data_t *end;
+		osc_data_t *bndl [32]; // 32 nested bundles should be enough
+		int bndl_cnt;
 	} data;
 };
 
@@ -455,9 +461,6 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 	LV2_Atom_Forge_Frame frame [2];
 
 	const osc_data_t *ptr = buf;
-
-	if(handle->data.frame_cnt == 0)
-		lv2_atom_forge_frame_time(forge, 0); //TODO syncronize time
 	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
 	for(const char *type = fmt; *type; type++)
@@ -553,44 +556,6 @@ static const osc_method_t methods [] = {
 	{NULL, NULL, _message},
 
 	{NULL, NULL, NULL}
-};
-
-// rt
-static void
-_unroll_stamp(osc_time_t tstmp, void *data)
-{
-	plughandle_t *handle = data;
-
-	//TODO
-}
-
-// rt
-static void
-_unroll_message(const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-
-	osc_dispatch_method(OSC_IMMEDIATE, buf, size, methods,
-		NULL, NULL, handle);
-}
-
-// rt
-static void
-_unroll_bundle(const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-
-	lv2_atom_forge_frame_time(forge, 0); //TODO synchronize time
-	osc_dispatch_method(OSC_IMMEDIATE, buf, size, methods,
-		_bundle_in, _bundle_out, handle);
-}
-
-static const osc_unroll_inject_t inject = {
-	.stamp = _unroll_stamp,
-	.message = _unroll_message,
-	.bundle = _unroll_bundle
 };
 
 static LV2_Handle
@@ -712,102 +677,120 @@ activate(LV2_Handle instance)
 	handle->restored = 1;
 }
 
-// rt-thread
+// rt
 static void
-_recv(uint64_t timestamp, const char *path, const char *fmt,
+_bundle_push_cb(uint64_t timestamp, void *data)
+{
+	plughandle_t *handle = data;
+
+	handle->data.ptr = osc_start_bundle(handle->data.ptr, handle->data.end,
+		timestamp, &handle->data.bndl[handle->data.bndl_cnt++]);
+}
+
+// rt
+static void
+_bundle_pop_cb(void *data)
+{
+	plughandle_t *handle = data;
+
+	handle->data.ptr = osc_end_bundle(handle->data.ptr, handle->data.end,
+		handle->data.bndl[--handle->data.bndl_cnt]);
+}
+
+// rt
+static void
+_message_cb(const char *path, const char *fmt,
 	const LV2_Atom_Tuple *body, void *data)
 {
 	plughandle_t *handle = data;
 
-	size_t reserve = osc_strlen(path) + osc_strlen(fmt) + body->atom.size;
+	osc_data_t *ptr = handle->data.ptr;
+	const osc_data_t *end = handle->data.end;
 
-	osc_data_t *buf;
-	if((buf = varchunk_write_request(handle->data.to_worker, reserve)))
+	osc_data_t *itm;
+	if(handle->data.bndl_cnt)
+		ptr = osc_start_bundle_item(ptr, end, &itm);
+
+	ptr = osc_set_path(ptr, end, path);
+	ptr = osc_set_fmt(ptr, end, fmt);
+
+	const LV2_Atom *itr = lv2_atom_tuple_begin(body);
+	for(const char *type = fmt;
+		*type && !lv2_atom_tuple_is_end(LV2_ATOM_BODY(body), body->atom.size, itr);
+		type++, itr = lv2_atom_tuple_next(itr))
 	{
-		osc_data_t *ptr = buf;
-		const osc_data_t *end = buf + reserve;
-
-		ptr = osc_set_path(ptr, end, path);
-		ptr = osc_set_fmt(ptr, end, fmt);
-
-		const LV2_Atom *itr = lv2_atom_tuple_begin(body);
-		for(const char *type = fmt;
-			*type && !lv2_atom_tuple_is_end(LV2_ATOM_BODY(body), body->atom.size, itr);
-			type++, itr = lv2_atom_tuple_next(itr))
+		switch(*type)
 		{
-			switch(*type)
+			case 'i':
 			{
-				case 'i':
-				{
-					ptr = osc_set_int32(ptr, end, ((const LV2_Atom_Int *)itr)->body);
-					break;
-				}
-				case 'f':
-				{
-					ptr = osc_set_float(ptr, end, ((const LV2_Atom_Float *)itr)->body);
-					break;
-				}
-				case 's':
-				case 'S':
-				{
-					ptr = osc_set_string(ptr, end, LV2_ATOM_BODY_CONST(itr));
-					break;
-				}
-				case 'b':
-				{
-					ptr = osc_set_blob(ptr, end, itr->size, LV2_ATOM_BODY(itr));
-					break;
-				}
+				ptr = osc_set_int32(ptr, end, ((const LV2_Atom_Int *)itr)->body);
+				break;
+			}
+			case 'f':
+			{
+				ptr = osc_set_float(ptr, end, ((const LV2_Atom_Float *)itr)->body);
+				break;
+			}
+			case 's':
+			case 'S':
+			{
+				ptr = osc_set_string(ptr, end, LV2_ATOM_BODY_CONST(itr));
+				break;
+			}
+			case 'b':
+			{
+				ptr = osc_set_blob(ptr, end, itr->size, LV2_ATOM_BODY(itr));
+				break;
+			}
 
-				case 'h':
-				{
-					ptr = osc_set_int64(ptr, end, ((const LV2_Atom_Long *)itr)->body);
-					break;
-				}
-				case 'd':
-				{
-					ptr = osc_set_double(ptr, end, ((const LV2_Atom_Double *)itr)->body);
-					break;
-				}
-				case 't':
-				{
-					ptr = osc_set_timetag(ptr, end, ((const LV2_Atom_Long *)itr)->body);
-					break;
-				}
+			case 'h':
+			{
+				ptr = osc_set_int64(ptr, end, ((const LV2_Atom_Long *)itr)->body);
+				break;
+			}
+			case 'd':
+			{
+				ptr = osc_set_double(ptr, end, ((const LV2_Atom_Double *)itr)->body);
+				break;
+			}
+			case 't':
+			{
+				ptr = osc_set_timetag(ptr, end, ((const LV2_Atom_Long *)itr)->body);
+				break;
+			}
 
-				case 'T':
-				case 'F':
-				case 'N':
-				case 'I':
-				{
-					break;
-				}
+			case 'T':
+			case 'F':
+			case 'N':
+			case 'I':
+			{
+				break;
+			}
 
-				case 'c':
-				{
-					ptr = osc_set_char(ptr, end, ((const LV2_Atom_Int *)itr)->body);
-					break;
-				}
-				case 'm':
-				{
-					const uint8_t *src = LV2_ATOM_BODY_CONST(itr);
-					const uint8_t dst [4] = {
-						0x00, // port byte
-						itr->size >= 1 ? src[0] : 0x00,
-						itr->size >= 2 ? src[1] : 0x00,
-						itr->size >= 3 ? src[2] : 0x00
-					};
-					ptr = osc_set_midi(ptr, end, dst);
-					break;
-				}
+			case 'c':
+			{
+				ptr = osc_set_char(ptr, end, ((const LV2_Atom_Int *)itr)->body);
+				break;
+			}
+			case 'm':
+			{
+				const uint8_t *src = LV2_ATOM_BODY_CONST(itr);
+				const uint8_t dst [4] = {
+					0x00, // port byte
+					itr->size >= 1 ? src[0] : 0x00,
+					itr->size >= 2 ? src[1] : 0x00,
+					itr->size >= 3 ? src[2] : 0x00
+				};
+				ptr = osc_set_midi(ptr, end, dst);
+				break;
 			}
 		}
-
-		size_t size = ptr ? ptr - buf : 0;
-
-		if(size)
-			varchunk_write_advance(handle->data.to_worker, size);
 	}
+
+	if(handle->data.bndl_cnt)
+		ptr = osc_end_bundle_item(ptr, end, itm);
+
+	handle->data.ptr = ptr;
 }
 
 const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
@@ -901,7 +884,24 @@ run(LV2_Handle instance, uint32_t nsamples)
 					handle->status_updated = 1;
 			}
 			else
-				osc_atom_event_unroll(&handle->oforge, obj, _recv, handle);
+			{
+				size_t reserve = obj->atom.size;
+				if((handle->data.buf = varchunk_write_request(handle->data.to_worker, reserve)))
+				{
+					handle->data.ptr = handle->data.buf;
+					handle->data.end = handle->data.buf + reserve;
+
+					osc_atom_event_unroll(&handle->oforge, obj, _bundle_push_cb,
+						_bundle_pop_cb, _message_cb, handle);
+
+					size_t size = handle->data.ptr
+						? handle->data.ptr - handle->data.buf
+						: 0;
+
+					if(size)
+						varchunk_write_advance(handle->data.to_worker, size);
+				}
+			}
 		}
 	}
 	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
@@ -912,8 +912,12 @@ run(LV2_Handle instance, uint32_t nsamples)
 	size_t size;
 	while((ptr = varchunk_read_request(handle->data.from_worker, &size)))
 	{
-		osc_unroll_packet((osc_data_t *)ptr, size, OSC_UNROLL_MODE_PARTIAL,
-			&inject, handle);
+		if(osc_check_packet(ptr, size))
+		{
+			lv2_atom_forge_frame_time(forge, 0);
+			osc_dispatch_method(OSC_IMMEDIATE, ptr, size, methods,
+				_bundle_in, _bundle_out, handle);
+		}
 
 		varchunk_read_advance(handle->data.from_worker);
 	}
