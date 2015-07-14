@@ -8,6 +8,7 @@ include_directories(${PROJECT_SOURCE_DIR}/libosc_stream)
 include_directories(${PROJECT_SOURCE_DIR}/osc.lv2)
 include_directories(${PROJECT_SOURCE_DIR}/clock_sync.lv2)
 include_directories(${PROJECT_SOURCE_DIR}/varchunk)
+include_directories(${PROJECT_SOURCE_DIR}/tlsf-3.0)
 include_directories(${PROJECT_BINARY_DIR})
 
 set(CMAKE_C_FLAGS "-std=gnu99 ${CMAKE_C_FLAGS}")
@@ -37,7 +38,8 @@ set(LIBS ${LIBS} ${UV_LDFLAGS})
 # eteroj
 add_library(eteroj MODULE
 	eteroj.c
-	eteroj_io.c)
+	eteroj_io.c
+	tlsf-3.0/tlsf.c)
 target_link_libraries(eteroj ${LIBS})
 if(WIN32)
 	target_link_libraries(eteroj "-lws2_32")

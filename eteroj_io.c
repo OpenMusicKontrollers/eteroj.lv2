@@ -27,10 +27,13 @@
 #include <varchunk.h>
 #include <lv2_osc.h>
 #include <clock_sync.h>
+#include <tlsf.h>
 
+#define POOL_SIZE 0x20000 // 128KB
 #define BUF_SIZE 0x10000
 
 typedef enum _plugstate_t plugstate_t;
+typedef struct _list_t list_t;
 typedef struct _plughandle_t plughandle_t;
 
 enum _plugstate_t {
@@ -39,6 +42,14 @@ enum _plugstate_t {
 	STATE_TIMEDOUT			= 2,
 	STATE_ERRORED				= 3,
 	STATE_CONNECTED			= 4
+};
+
+struct _list_t {
+	list_t *next;
+	uint64_t frames;
+
+	size_t size;
+	osc_data_t buf [0];
 };
 
 struct _plughandle_t {
@@ -88,6 +99,9 @@ struct _plughandle_t {
 
 	Clock_Sync_Schedule *clock_sched;
 	uint64_t last_frame;
+	list_t *list;
+	uint8_t mem [POOL_SIZE];
+	tlsf_t tlsf;
 
 	struct {
 		osc_stream_driver_t driver;
@@ -104,6 +118,27 @@ struct _plughandle_t {
 		int bndl_cnt;
 	} data;
 };
+
+static inline list_t *
+_list_insert(list_t *root, list_t *item)
+{
+	if(!root || (item->frames < root->frames) ) // prepend
+	{
+		item->next = root;
+		return item;
+	}
+
+	list_t *l0;
+	for(l0 = root; l0->next != NULL; l0 = l0->next)
+	{
+		if(item->frames < l0->next->frames)
+			break; // found insertion point
+	}
+
+	item->next = l0->next; // is NULL at end of list
+	l0->next = item;
+	return root;
+}
 
 static void
 lprintf(plughandle_t *handle, LV2_URID type, const char *fmt, ...)
@@ -343,37 +378,6 @@ _data_free(void *data)
 }
 
 // rt
-static void
-_bundle_in(osc_time_t timestamp, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-
-	if(handle->clock_sched)
-	{
-		uint64_t frames = handle->clock_sched->time2frames(handle->clock_sched->handle, timestamp);
-		printf("_bundle_in: %08lx:%08lx %lu %lu %li\n",
-			timestamp >> 32, timestamp & 0xffffffff,
-			handle->last_frame, frames, frames - handle->last_frame);
-	}
-
-	//TODO check return
-	osc_forge_bundle_push(&handle->oforge, forge,
-		handle->data.frame[handle->data.frame_cnt++], timestamp);
-}
-
-// rt
-static void
-_bundle_out(osc_time_t timestamp, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-
-	osc_forge_bundle_pop(&handle->oforge, forge,
-		handle->data.frame[--handle->data.frame_cnt]);
-}
-
-// rt
 static int
 _resolve(osc_time_t timestamp, const char *path, const char *fmt,
 	const osc_data_t *buf, size_t size, void *data)
@@ -473,6 +477,10 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 	LV2_Atom_Forge_Frame frame [2];
 
 	const osc_data_t *ptr = buf;
+
+	if(!handle->data.frame_cnt) // message not in a bundle
+		lv2_atom_forge_frame_time(forge, 0);
+
 	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
 	for(const char *type = fmt; *type; type++)
@@ -570,6 +578,62 @@ static const osc_method_t methods [] = {
 	{NULL, NULL, NULL}
 };
 
+// rt
+static void
+_unroll_stamp(osc_time_t stamp, void *data)
+{
+	plughandle_t *handle = data;
+
+	//FIXME
+}
+
+// rt
+static void
+_unroll_message(const osc_data_t *buf, size_t size, void *data)
+{
+	plughandle_t *handle = data;
+
+	osc_dispatch_method(buf, size, methods, NULL, NULL, handle);
+}
+
+// rt
+static void
+_unroll_bundle(const osc_data_t *buf, size_t size, void *data)
+{
+	plughandle_t *handle = data;
+
+	uint64_t time = be64toh(*(uint64_t *)(buf + 8));
+
+	uint64_t frames;
+	if(handle->clock_sched)
+		frames = handle->clock_sched->time2frames(handle->clock_sched->handle, time);
+	else
+		frames = 0;
+
+	frames = frames
+		? frames
+		: handle->last_frame;
+
+	// add event to list
+	list_t *l = tlsf_malloc(handle->tlsf, sizeof(list_t) + size);
+	if(l)
+	{
+		l->frames = frames;
+		l->size = size;
+		memcpy(l->buf, buf, size);
+
+		handle->list = _list_insert(handle->list, l);
+	}
+	else
+		lprintf(handle, handle->uris.log_trace, "message pool overflow");
+}
+
+static const osc_unroll_inject_t inject = {
+	.stamp = _unroll_stamp,
+	.message = _unroll_message,
+	.bundle = _unroll_bundle
+};
+
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
 	const char *bundle_path, const LV2_Feature *const *features)
@@ -603,6 +667,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		free(handle);
 		return NULL;
 	}
+
+	handle->tlsf = tlsf_create_with_pool(handle->mem, POOL_SIZE);
 
 	handle->uris.state_default = handle->map->map(handle->map->handle,
 		LV2_STATE__loadDefaultState);
@@ -932,14 +998,42 @@ run(LV2_Handle instance, uint32_t nsamples)
 	while((ptr = varchunk_read_request(handle->data.from_worker, &size)))
 	{
 		if(osc_check_packet(ptr, size))
-		{
-			lv2_atom_forge_frame_time(forge, 0); //FIXME
-			osc_dispatch_method(ptr, size, methods,
-				_bundle_in, _bundle_out, handle);
-		}
+			osc_unroll_packet((osc_data_t *)ptr, size, OSC_UNROLL_MODE_PARTIAL, &inject, handle);
 
 		varchunk_read_advance(handle->data.from_worker);
 	}
+
+	// handle scheduled bundles
+	list_t *l;
+	for(l = handle->list; l; )
+	{
+		int64_t rel = l->frames - handle->last_frame;
+
+		if(rel < 0) // late event
+		{
+			lprintf(handle, handle->uris.log_trace, "late event: %li", rel);
+			rel = 0;
+		}
+		else if(rel >= nsamples) // not scheduled for this period
+		{
+			break;
+		}
+
+		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
+
+		lv2_atom_forge_frame_time(forge, rel);
+		//TODO check return
+		osc_forge_bundle_push(&handle->oforge, forge,
+			handle->data.frame[handle->data.frame_cnt++], time);
+		osc_dispatch_method(l->buf, l->size, methods, NULL, NULL, handle);
+		osc_forge_bundle_pop(&handle->oforge, forge,
+			handle->data.frame[--handle->data.frame_cnt]);
+
+		list_t *l0 = l;
+		l = l->next;
+		tlsf_free(handle->tlsf, l0);
+	}
+	handle->list = l;
 
 	if(handle->needs_flushing)
 	{
@@ -1016,6 +1110,7 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
+	tlsf_destroy(handle->tlsf);
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 	free(handle);
