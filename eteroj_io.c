@@ -26,6 +26,7 @@
 #include <eteroj.h>
 #include <varchunk.h>
 #include <lv2_osc.h>
+#include <clock_sync.h>
 
 #define BUF_SIZE 0x10000
 
@@ -84,6 +85,9 @@ struct _plughandle_t {
 	LV2_Worker_Schedule *sched;
 	LV2_Worker_Respond_Function respond;
 	LV2_Worker_Respond_Handle target;
+
+	Clock_Sync_Schedule *clock_sched;
+	uint64_t last_frame;
 
 	struct {
 		osc_stream_driver_t driver;
@@ -251,7 +255,7 @@ _work(LV2_Handle instance,
 	handle->respond = respond;
 	handle->target = target;
 
-	osc_dispatch_method(OSC_IMMEDIATE, body, size, worker_api, NULL, NULL, handle);
+	osc_dispatch_method(body, size, worker_api, NULL, NULL, handle);
 	uv_run(&handle->loop, UV_RUN_NOWAIT);
 
 	handle->respond = NULL;
@@ -344,6 +348,14 @@ _bundle_in(osc_time_t timestamp, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
+
+	if(handle->clock_sched)
+	{
+		uint64_t frames = handle->clock_sched->time2frames(handle->clock_sched->handle, timestamp);
+		printf("_bundle_in: %08lx:%08lx %lu %lu %li\n",
+			timestamp >> 32, timestamp & 0xffffffff,
+			handle->last_frame, frames, frames - handle->last_frame);
+	}
 
 	//TODO check return
 	osc_forge_bundle_push(&handle->oforge, forge,
@@ -569,11 +581,13 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	for(i=0; features[i]; i++)
 		if(!strcmp(features[i]->URI, LV2_URID__map))
-			handle->map = (LV2_URID_Map *)features[i]->data;
+			handle->map = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_LOG__log))
-			handle->log = (LV2_Log_Log *)features[i]->data;
+			handle->log = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
-			handle->sched = (LV2_Worker_Schedule *)features[i]->data;
+			handle->sched = features[i]->data;
+		else if(!strcmp(features[i]->URI, CLOCK_SYNC__schedule))
+			handle->clock_sched = features[i]->data;
 
 	if(!handle->map)
 	{
@@ -821,6 +835,11 @@ run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = instance;
 
+	if(handle->clock_sched)
+		handle->last_frame = handle->clock_sched->frames(handle->clock_sched->handle);
+	else
+		handle->last_frame = 0;
+
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
 	uint32_t capacity;
@@ -914,8 +933,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 	{
 		if(osc_check_packet(ptr, size))
 		{
-			lv2_atom_forge_frame_time(forge, 0);
-			osc_dispatch_method(OSC_IMMEDIATE, ptr, size, methods,
+			lv2_atom_forge_frame_time(forge, 0); //FIXME
+			osc_dispatch_method(ptr, size, methods,
 				_bundle_in, _bundle_out, handle);
 		}
 
