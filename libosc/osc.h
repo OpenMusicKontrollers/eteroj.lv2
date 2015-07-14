@@ -858,17 +858,18 @@ _osc_method_dispatch_message(uint64_t time, const osc_data_t *buf, size_t size,
 }
 
 static inline void
-_osc_method_dispatch_bundle(uint64_t time, const osc_data_t *buf, size_t size,
+_osc_method_dispatch_bundle(const osc_data_t *buf, size_t size,
 	const osc_method_t *methods, osc_bundle_in_cb_t bundle_in,
 	osc_bundle_out_cb_t bundle_out, void *data)
 {
 	const osc_data_t *ptr = buf;
 	const osc_data_t *end = buf + size;
 
+	uint64_t time = be64toh(*(const uint64_t *)(ptr + 8));
+	ptr += 16; // skip bundle header
+
 	if(bundle_in)
 		bundle_in(time, data);
-
-	ptr += 16; // skip bundle header
 
 	while(ptr < end)
 	{
@@ -877,7 +878,7 @@ _osc_method_dispatch_bundle(uint64_t time, const osc_data_t *buf, size_t size,
 		switch(*ptr)
 		{
 			case '#':
-				_osc_method_dispatch_bundle(time, ptr, len, methods, bundle_in,
+				_osc_method_dispatch_bundle(ptr, len, methods, bundle_in,
 					bundle_out, data);
 				break;
 			case '/':
@@ -892,18 +893,18 @@ _osc_method_dispatch_bundle(uint64_t time, const osc_data_t *buf, size_t size,
 }
 
 static inline void
-osc_dispatch_method(uint64_t time, const osc_data_t *buf, size_t size,
+osc_dispatch_method(const osc_data_t *buf, size_t size,
 	const osc_method_t *methods, osc_bundle_in_cb_t bundle_in,
 	osc_bundle_out_cb_t bundle_out, void *data)
 {
 	switch(*buf)
 	{
 		case '#':
-			_osc_method_dispatch_bundle(time, buf, size, methods, bundle_in,
+			_osc_method_dispatch_bundle(buf, size, methods, bundle_in,
 				bundle_out, data);
 			break;
 		case '/':
-			_osc_method_dispatch_message(time, buf, size, methods, data);
+			_osc_method_dispatch_message(OSC_IMMEDIATE, buf, size, methods, data);
 			break;
 	}
 }
