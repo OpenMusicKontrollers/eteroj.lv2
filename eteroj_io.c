@@ -46,7 +46,7 @@ enum _plugstate_t {
 
 struct _list_t {
 	list_t *next;
-	uint64_t frames;
+	int64_t frames;
 
 	size_t size;
 	osc_data_t buf [0];
@@ -98,7 +98,6 @@ struct _plughandle_t {
 	LV2_Worker_Respond_Handle target;
 
 	Clock_Sync_Schedule *clock_sched;
-	uint64_t last_frame;
 	list_t *list;
 	uint8_t mem [POOL_SIZE];
 	tlsf_t tlsf;
@@ -604,15 +603,11 @@ _unroll_bundle(const osc_data_t *buf, size_t size, void *data)
 
 	uint64_t time = be64toh(*(uint64_t *)(buf + 8));
 
-	uint64_t frames;
+	int64_t frames;
 	if(handle->clock_sched)
-		frames = handle->clock_sched->time2frames(handle->clock_sched->handle, time);
+		frames = handle->clock_sched->schedule(handle->clock_sched->handle, time);
 	else
 		frames = 0;
-
-	frames = frames
-		? frames
-		: handle->last_frame;
 
 	// add event to list
 	list_t *l = tlsf_malloc(handle->tlsf, sizeof(list_t) + size);
@@ -901,11 +896,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = instance;
 
-	if(handle->clock_sched)
-		handle->last_frame = handle->clock_sched->frames(handle->clock_sched->handle);
-	else
-		handle->last_frame = 0;
-
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
 	uint32_t capacity;
@@ -1007,21 +997,22 @@ run(LV2_Handle instance, uint32_t nsamples)
 	list_t *l;
 	for(l = handle->list; l; )
 	{
-		int64_t rel = l->frames - handle->last_frame;
-
-		if(rel < 0) // late event
-		{
-			lprintf(handle, handle->uris.log_trace, "late event: %li", rel);
-			rel = 0;
-		}
-		else if(rel >= nsamples) // not scheduled for this period
-		{
-			break;
-		}
-
 		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
+		//lprintf(handle, handle->uris.log_trace, "frames: %lu, %lu", time, l->frames);
 
-		lv2_atom_forge_frame_time(forge, rel);
+		if(l->frames < 0) // late event
+		{
+			lprintf(handle, handle->uris.log_trace, "late event: %li samples", l->frames);
+			l->frames = 0; // dispatch as early as possible
+		}
+		else if(l->frames >= nsamples) // not scheduled for this period
+		{
+			l->frames -= nsamples; // subtract period size
+			l = l->next;
+			continue;
+		}
+
+		lv2_atom_forge_frame_time(forge, l->frames);
 		//TODO check return
 		osc_forge_bundle_push(&handle->oforge, forge,
 			handle->data.frame[handle->data.frame_cnt++], time);
@@ -1031,9 +1022,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 		list_t *l0 = l;
 		l = l->next;
+		handle->list = l;
 		tlsf_free(handle->tlsf, l0);
 	}
-	handle->list = l;
 
 	if(handle->needs_flushing)
 	{
