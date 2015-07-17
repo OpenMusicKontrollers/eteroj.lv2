@@ -40,9 +40,13 @@
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"
 #define ETEROJ_STAT_URI								ETEROJ_URI"#status"
 
+#define ETEROJ_PATH_URI								ETEROJ_URI"#path"
+
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"
+#define ETEROJ_DISK_URI								ETEROJ_URI"#disk"
 
 extern const LV2_Descriptor eteroj_io;
+extern const LV2_Descriptor eteroj_disk;
 
 #endif // _ETEROJ_LV2_H

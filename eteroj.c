@@ -24,6 +24,8 @@ lv2_descriptor(uint32_t index)
 	{
 		case 0:
 			return &eteroj_io;
+		case 1:
+			return &eteroj_disk;
 		default:
 			return NULL;
 	}

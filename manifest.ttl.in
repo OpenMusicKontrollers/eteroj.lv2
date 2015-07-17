@@ -26,3 +26,11 @@ eteroj:io
 	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;
 	lv2:binary <eteroj@LIB_EXT@> ;
 	rdfs:seeAlso <eteroj.ttl> .
+
+# Eteroj Recorder/Player
+eteroj:disk
+	a lv2:Plugin ;
+	lv2:minorVersion @ETEROJ_MINOR_VERSION@ ;
+	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;
+	lv2:binary <eteroj@LIB_EXT@> ;
+	rdfs:seeAlso <eteroj.ttl> .

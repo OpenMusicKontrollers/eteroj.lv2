@@ -38,6 +38,7 @@ set(LIBS ${LIBS} ${UV_LDFLAGS})
 add_library(eteroj MODULE
 	eteroj.c
 	eteroj_io.c
+	eteroj_disk.c
 	tlsf-3.0/tlsf.c)
 target_link_libraries(eteroj ${LIBS})
 if(WIN32)

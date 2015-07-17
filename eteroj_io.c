@@ -867,8 +867,8 @@ _message_cb(const char *path, const char *fmt,
 	handle->data.ptr = ptr;
 }
 
-const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
-const char recv_msg [] = "/eteroj/recv\0\0\0\0,\0\0\0";
+static const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
+static const char recv_msg [] = "/eteroj/recv\0\0\0\0,\0\0\0";
 
 // rt
 static void
