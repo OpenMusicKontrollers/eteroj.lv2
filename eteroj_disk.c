@@ -251,7 +251,7 @@ _worker_api_record(osc_time_t timestamp, const char *path, const char *fmt,
 	if(!handle->osc_file)
 		return 1;
 
-	printf("_worker_api_record\n");
+	//printf("_worker_api_record\n");
 		
 	fseek(handle->osc_file, handle->write_ptr, SEEK_SET);
 
