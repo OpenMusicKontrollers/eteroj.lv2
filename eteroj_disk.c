@@ -75,8 +75,8 @@ struct _plughandle_t {
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
 	const float *state;
-	plugstate_t state_i; 
-	
+	plugstate_t state_i;
+
 	LV2_Worker_Schedule *sched;
 	LV2_Worker_Respond_Function respond;
 	LV2_Worker_Respond_Handle target;
@@ -84,10 +84,10 @@ struct _plughandle_t {
 	struct {
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
-		
+
 		int frame_cnt;
 		LV2_Atom_Forge_Frame frame [32][2]; // 32 nested bundles should be enough
-		
+
 		osc_data_t *buf;
 		osc_data_t *ptr;
 		osc_data_t *end;
@@ -178,7 +178,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 
 	if(!osc_path)
 		osc_path = "dump.osc";
-		
+
 	const char *absolute = map_path->absolute_path(map_path->handle, osc_path);
 
 	strcpy(handle->osc_path, absolute);
@@ -219,7 +219,7 @@ _worker_api_path(osc_time_t timestamp, const char *path, const char *fmt,
 		return 1;
 
 	fseek(handle->osc_file, 0, SEEK_SET);
-		
+
 	header_t header;
 	if(fread(&header, sizeof(header_t), 1, handle->osc_file) == 1)
 	{
@@ -252,7 +252,7 @@ _worker_api_record(osc_time_t timestamp, const char *path, const char *fmt,
 		return 1;
 
 	//printf("_worker_api_record\n");
-		
+
 	fseek(handle->osc_file, handle->write_ptr, SEEK_SET);
 
 	event_t *ev;
@@ -290,8 +290,10 @@ _worker_api_play(osc_time_t timestamp, const char *path, const char *fmt,
 		return 1;
 
 	//printf("_worker_api_play\n");
-		
+
 	fseek(handle->osc_file, handle->read_ptr, SEEK_SET);
+
+	int complete = 1;
 
 	// read as many events as possible from disk and add to ringbuffer
 	while(!feof(handle->osc_file))
@@ -300,6 +302,8 @@ _worker_api_play(osc_time_t timestamp, const char *path, const char *fmt,
 		if(fread(&ev, sizeof(event_t), 1, handle->osc_file) != 1)
 			break;
 		_event_ntoh(&ev);
+
+		complete = 0;
 
 		void *ptr;
 		const size_t len = sizeof(event_t) + ev.size;
@@ -310,12 +314,15 @@ _worker_api_play(osc_time_t timestamp, const char *path, const char *fmt,
 				break;
 
 			varchunk_write_advance(handle->data.from_worker, len);
+			complete = 1;
 		}
 		else
 			break;
 	}
 
 	handle->read_ptr = ftell(handle->osc_file);
+	if(!complete)
+		handle->read_ptr -= sizeof(event_t);
 
 	return 1;
 }
@@ -331,7 +338,7 @@ _worker_api_pause(osc_time_t timestamp, const char *path, const char *fmt,
 		return 1;
 
 	//printf("_worker_api_pause\n");
-	
+
 	handle->read_ptr = sizeof(header_t);
 	handle->write_ptr = sizeof(header_t);
 
@@ -601,7 +608,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	if(!handle->map)
 	{
-		fprintf(stderr, 
+		fprintf(stderr,
 			"%s: Host does not support urid:map\n", descriptor->URI);
 		free(handle);
 		return NULL;
@@ -806,7 +813,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = instance;
 
-	plugstate_t state = floor(*handle->state); 
+	plugstate_t state = floor(*handle->state);
 
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
@@ -850,7 +857,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 						oev->delta = handle->offset.record;
 						oev->size = size;
 
-						// offset is always relative to sample #0 of last events period 
+						// offset is always relative to sample #0 of last events period
 						handle->offset.record = -ev->time.frames;
 
 						varchunk_write_advance(handle->data.to_worker, sizeof(event_t) + size);
@@ -916,7 +923,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	handle->offset.play -= nsamples;
 	handle->offset.record += nsamples;
-	
+
 	if(handle->restored && handle->osc_path[0])
 	{
 		_path_change(handle, handle->osc_path);
