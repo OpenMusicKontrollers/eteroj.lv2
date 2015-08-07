@@ -37,6 +37,11 @@
 osc:schedule
 	a lv2:Feature .
 
+osc:Event
+	a rdfs:Class ;
+	rdfs:subClassOf atom:Object ;
+	rdfs:label "OSC Event (Bundle or Message)" .
+
 # Maintainer
 omk:me
 	a foaf:Person ;
