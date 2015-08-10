@@ -139,7 +139,7 @@ eteroj:disk
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
-	lv2:requiredFeature work:schedule, urid:map ;
+	lv2:requiredFeature work:schedule, urid:map, state:makePath ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	patch:writable eteroj:path ;

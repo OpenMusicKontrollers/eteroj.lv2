@@ -66,7 +66,7 @@ struct _plughandle_t {
 	FILE *osc_file;
 	size_t write_ptr;
 	size_t read_ptr;
-	char osc_path [512];
+	char osc_path [1024];
 	volatile int restored;
 
 	osc_forge_t oforge;
@@ -600,11 +600,15 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->sample_rate = rate;
 	handle->state_i = STATE_PAUSE;
 
+	const LV2_State_Make_Path *make_path = NULL;
+
 	for(i=0; features[i]; i++)
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
 			handle->sched = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_STATE__makePath))
+			make_path = features[i]->data;
 
 	if(!handle->map)
 	{
@@ -617,6 +621,13 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	{
 		fprintf(stderr,
 			"%s: Host does not support worker:sched\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+	if(!make_path)
+	{
+		fprintf(stderr,
+			"%s: Host does not support state:makePath\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
@@ -636,7 +647,9 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->osc_path[0] = '\0';
+	char *tmp = make_path->path(make_path->handle, "dump.osc");
+	strcpy(handle->osc_path, tmp);
+	free(tmp);
 
 	return handle;
 }
