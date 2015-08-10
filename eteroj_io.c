@@ -981,6 +981,16 @@ run(LV2_Handle instance, uint32_t nsamples)
 	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
 		handle->needs_flushing = 1;
 
+	// reschedule scheduled bundles
+	list_t *l;
+	for(l = handle->list; l; l = l->next)
+	{
+		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
+
+		int64_t frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
+		l->frames = frames;
+	}
+
 	// read incoming data
 	const osc_data_t *ptr;
 	size_t size;
@@ -993,7 +1003,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 	}
 
 	// handle scheduled bundles
-	list_t *l;
 	for(l = handle->list; l; )
 	{
 		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
@@ -1006,7 +1015,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 		}
 		else if(l->frames >= nsamples) // not scheduled for this period
 		{
-			l->frames -= nsamples; // subtract period size
 			l = l->next;
 			continue;
 		}
