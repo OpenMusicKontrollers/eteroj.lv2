@@ -639,9 +639,6 @@ _duplex_prefix_alloc(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 {
 	const osc_stream_driver_t *driver = stream->driver;
 
-	if(suggested_size > OSC_STREAM_BUF_SIZE)
-		suggested_size = OSC_STREAM_BUF_SIZE;
-
 	if(duplex->nchunk == sizeof(int32_t))
 	{
 		buf->base = (char *)&duplex->prefix;
@@ -649,8 +646,8 @@ _duplex_prefix_alloc(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 	}
 	else
 	{
-		buf->base = driver->recv_req(suggested_size, stream->data);
-		buf->len = buf->base ? suggested_size : 0;
+		buf->base = driver->recv_req(duplex->nchunk, stream->data);
+		buf->len = buf->base ? duplex->nchunk : 0;
 	}
 }
 
