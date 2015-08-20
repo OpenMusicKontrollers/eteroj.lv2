@@ -25,6 +25,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 #include <uv.h>
 
 /*****************************************************************************
@@ -406,7 +407,6 @@ _getaddrinfo_udp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 	osc_stream_udp_t *udp = (void *)req - offsetof(osc_stream_udp_t, req);
 	osc_stream_udp_tx_t *tx = &udp->tx;
 	osc_stream_t *stream = (void *)udp - offsetof(osc_stream_t, udp);
-	const osc_stream_driver_t *driver = stream->driver;
 	int err;
 
 	if( (status >= 0) && res)
@@ -489,7 +489,6 @@ _getaddrinfo_udp_rx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 	uv_loop_t *loop = req->loop;
 	osc_stream_udp_t *udp = (void *)req - offsetof(osc_stream_udp_t, req);
 	osc_stream_t *stream = (void *)udp - offsetof(osc_stream_t, udp);
-	const osc_stream_driver_t *driver = stream->driver;
 	int err;
 
 	if( (status >= 0) && res)
@@ -678,8 +677,6 @@ static inline void
 _duplex_slip_alloc(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 	size_t suggested_size, uv_buf_t *buf)
 {
-	const osc_stream_driver_t *driver = stream->driver;
-
 	buf->base = duplex->buf_rx;
 	buf->base += duplex->nchunk; // is there remaining chunk from last call?
 	buf->len = OSC_STREAM_BUF_SIZE - duplex->nchunk;
@@ -815,7 +812,6 @@ _sender_connect(uv_connect_t *conn, int status)
 	osc_stream_tcp_t *tcp = socket->data;
 
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 	osc_stream_tcp_tx_t *tx = &tcp->tx;
 	int err;
 
@@ -853,7 +849,6 @@ _getaddrinfo_tcp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 	uv_loop_t *loop = req->loop;
 	osc_stream_tcp_t *tcp = (void *)req - offsetof(osc_stream_tcp_t, req);
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 	int err;
 
 	if( (status >= 0) && res)
@@ -942,7 +937,6 @@ _responder_connect(uv_stream_t *socket, int status)
 	uv_loop_t *loop = socket->loop;
 	osc_stream_tcp_t *tcp = (void *)socket - offsetof(osc_stream_tcp_t, socket);
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 	int err;
 
 	if(status)
@@ -1002,7 +996,6 @@ _getaddrinfo_tcp_rx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 	uv_loop_t *loop = req->loop;
 	osc_stream_tcp_t *tcp = (void *)req - offsetof(osc_stream_tcp_t, req);
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
-	const osc_stream_driver_t *driver = stream->driver;
 	int err;
 
 	if(status >= 0)
@@ -1282,7 +1275,6 @@ static inline void
 _ser_init(uv_loop_t *loop, osc_stream_t *stream, int fd)
 {
 	osc_stream_ser_t *ser = &stream->ser;
-	const osc_stream_driver_t *driver = stream->driver;
 	ser->duplex.nchunk = 0;
 	ser->fd = fd;
 
