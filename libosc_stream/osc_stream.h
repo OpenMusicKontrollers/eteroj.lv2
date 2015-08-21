@@ -27,6 +27,7 @@ extern "C" {
 #include <unistd.h>
 #include <string.h>
 #include <uv.h>
+#include <termios.h>
 
 /*****************************************************************************
  * API START
@@ -102,7 +103,7 @@ union _osc_stream_addr_t {
 	struct sockaddr_in ip4;
 	struct sockaddr_in6 ip6;
 };
-	
+
 struct _osc_stream_udp_tx_t {
 	osc_stream_addr_t addr;
 	uv_udp_send_t req;
@@ -186,24 +187,25 @@ slip_encode(char *buf, uv_buf_t *bufs, int nbufs)
 {
 	char *dst = buf;
 
-	int i;
-	for(i=0; i<nbufs; i++)
+	*dst++ = SLIP_END;
+	for(int i=0; i<nbufs; i++)
 	{
 		uv_buf_t *ptr = &bufs[i];
 		char *base = (char *)ptr->base;
 		char *end = base + ptr->len;
 
-		char *src;
-		for(src=base; src<end; src++)
+		 for(char *src=base; src<end; src++)
 			switch(*src)
 			{
 				case SLIP_END:
-					*dst++ = SLIP_ESC;
-					*dst++ = SLIP_END_REPLACE;
+					dst[0] = SLIP_ESC;
+					dst[1] = SLIP_END_REPLACE;
+					dst += 2;
 					break;
 				case SLIP_ESC:
-					*dst++ = SLIP_ESC;
-					*dst++ = SLIP_ESC_REPLACE;
+					dst[0] = SLIP_ESC;
+					dst[1] = SLIP_ESC_REPLACE;
+					dst += 2;
 					break;
 				default:
 					*dst++ = *src;
@@ -217,16 +219,27 @@ slip_encode(char *buf, uv_buf_t *bufs, int nbufs)
 
 // inline SLIP decoding
 static inline size_t
-slip_decode(char *buf, size_t len, size_t *size)
+slip_decode(char *dst_buf, const char *src_buf, size_t len, size_t *size)
 {
-	char *src = buf;
-	char *end = buf + len;
-	char *dst = buf;
+	char *dst = dst_buf;
+	const char *src = src_buf;
+	const char *end = src_buf + len;
+
+	int whole = 0;
+
+	if( (src < end) && (*src == SLIP_END) )
+	{
+		 whole = 1;
+		 src++;
+	}
 
 	while(src < end)
 	{
 		if(*src == SLIP_ESC)
 		{
+			if(src == end-1)
+				break;
+
 			src++;
 			if(*src == SLIP_END_REPLACE)
 				*dst++ = SLIP_END;
@@ -239,17 +252,16 @@ slip_decode(char *buf, size_t len, size_t *size)
 		else if(*src == SLIP_END)
 		{
 			src++;
-			*size = dst - buf;
-			return src - buf;
+
+			*size = whole ? dst - dst_buf : 0;
+			return src - src_buf;
 		}
 		else
 		{
-			if(src != dst)
-				*dst = *src;
-			src++;
-			dst++;
+			*dst++ = *src++;
 		}
 	}
+
 	*size = 0;
 	return 0;
 }
@@ -274,13 +286,16 @@ typedef enum _osc_stream_message_t {
 static inline char *
 strndup(const char *s, size_t n)
 {
-    char *result;
-    size_t len = strlen (s);
-    if (n < len) len = n;
-    result = (char *) malloc (len + 1);
-    if (!result) return 0;
-    result[len] = '\0';
-    return (char *) strncpy (result, s, len);
+	char *result;
+	size_t len = strlen (s);
+	if(n < len)
+		len = n;
+	result = (char *) malloc (len + 1);
+	if(!result)
+		return 0;
+	result[len] = '\0';
+
+	return (char *) strncpy (result, s, len);
 }
 #endif
 
@@ -379,7 +394,7 @@ _udp_recv_cb(uv_udp_t *handle, ssize_t nread, const uv_buf_t *buf, const struct 
 	osc_stream_udp_t *udp = (void *)socket - offsetof(osc_stream_udp_t, socket);
 	osc_stream_t *stream = (void *)udp - offsetof(osc_stream_t, udp);
 	const osc_stream_driver_t *driver = stream->driver;
-	
+
 	if(nread > 0)
 	{
 		if(udp->server)
@@ -450,7 +465,7 @@ _getaddrinfo_udp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				break;
 			}
 		}
-		
+
 		if((err = uv_udp_bind(&udp->socket, &src.ip, flags)))
 			goto fail;
 
@@ -522,7 +537,7 @@ _getaddrinfo_udp_rx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				break;
 			}
 		}
-		
+
 		if((err = uv_udp_bind(&udp->socket, &src.ip, flags)))
 			goto fail;
 
@@ -543,7 +558,7 @@ _getaddrinfo_udp_rx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 
 fail:
 	_instant_err(stream, "_getaddrinfo_udp_rx_cb", err);
-	
+
 	if(res)
 		uv_freeaddrinfo(res);
 }
@@ -562,7 +577,7 @@ _udp_send_cb(uv_udp_send_t *req, int status)
 	if(!status)
 	{
 		driver->send_adv(stream->data);
-		
+
 		stream->flushing = 0; // reset flushing flag
 		_udp_flush(stream); // look for more data to flush
 	}
@@ -587,7 +602,7 @@ _udp_flush(osc_stream_t *stream)
 
 	uv_buf_t *msg = &udp->tx.msg;
 	msg->base = (char *)driver->send_req(&msg->len, stream->data);
-	
+
 	if(msg->base && (msg->len > 0))
 	{
 		stream->flushing = 1; // set flushing flag
@@ -657,6 +672,9 @@ _duplex_prefix_recv_cb(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 {
 	const osc_stream_driver_t *driver = stream->driver;
 
+	if(nread < 0)
+		 return; //TODO report error
+
 	if(nread == sizeof(int32_t))
 	{
 		duplex->nchunk = ntohl(*(int32_t *)buf->base);
@@ -679,26 +697,38 @@ _duplex_slip_alloc(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 	buf->len = OSC_STREAM_BUF_SIZE - duplex->nchunk;
 }
 
+#include <assert.h>
+
 static inline void
 _duplex_slip_recv_cb(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 	ssize_t nread, const uv_buf_t *buf)
 {
 	const osc_stream_driver_t *driver = stream->driver;
-	
+
+	if(nread < 0)
+		 return; //TODO report error
+
 	char *ptr = duplex->buf_rx;
 	nread += duplex->nchunk; // is there remaining chunk from last call?
-	size_t size;
-	size_t parsed;
-	while( (parsed = slip_decode(ptr, nread, &size)) && (nread > 0) )
+
+	char *tar;
+	while( (nread > 0) && (tar = driver->recv_req(nread, stream->data)) )
 	{
-		void *tar;
-		if((tar = driver->recv_req(size, stream->data)))
+		size_t size;
+		size_t parsed = slip_decode(tar, ptr, nread, &size);
+
+		if(size)
 		{
-			memcpy(tar, ptr, size);
 			driver->recv_adv(size, stream->data);
 		}
-		ptr += parsed;
-		nread -= parsed;
+
+		if(parsed)
+		{
+			ptr += parsed;
+			nread -= parsed;
+		}
+		else
+			break;
 	}
 
 	if(nread > 0) // is there remaining chunk for next call?
@@ -781,7 +811,7 @@ _tcp_slip_recv_cb(uv_stream_t *socket, ssize_t nread, const uv_buf_t *buf)
 	osc_stream_duplex_t *duplex = &tcp->duplex;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
 	osc_stream_tcp_tx_t *tx = (void *)socket - offsetof(osc_stream_tcp_tx_t, socket);
-	
+
 	if(nread > 0)
 	{
 		_duplex_slip_recv_cb(stream, duplex, nread, buf);
@@ -860,9 +890,9 @@ _getaddrinfo_tcp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 			const struct sockaddr_in6 *ip6;
 		} src;
 		char remote [128] = {'\0'};
-		
+
 		src.ip = res->ai_addr;;
-		
+
 		switch(tcp->version)
 		{
 			case OSC_STREAM_IP_VERSION_4:
@@ -878,7 +908,7 @@ _getaddrinfo_tcp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				break;
 			}
 		}
-		
+
 		if((err = uv_tcp_init(loop, &tx->socket)))
 			goto fail;
 
@@ -903,7 +933,7 @@ _getaddrinfo_tcp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 				break;
 			}
 		}
-		
+
 		if((err = uv_tcp_connect(&tcp->conn, &tx->socket, &addr.ip, _sender_connect)))
 			goto fail;
 		if((err = uv_tcp_nodelay(&tx->socket, 1))) // disable Nagle's algo
@@ -915,7 +945,7 @@ _getaddrinfo_tcp_tx_cb(uv_getaddrinfo_t *req, int status, struct addrinfo *res)
 	}
 	else
 		_instant_msg(stream, OSC_STREAM_MESSAGE_TIMEOUT);
-	
+
 	if(res)
 		uv_freeaddrinfo(res);
 
@@ -977,7 +1007,7 @@ _responder_connect(uv_stream_t *socket, int status)
 			goto fail;
 		if((err = uv_tcp_keepalive(&tx->socket, 1, 5))) // keepalive after 5 seconds
 			goto fail;
-		
+
 		tcp->connected = 1;
 	}
 
@@ -1158,7 +1188,7 @@ _tcp_free(osc_stream_t *stream)
 	if(uv_is_active((uv_handle_t *)&tx->req))
 		uv_cancel((uv_req_t *)&tx->req);
 
-	if(tcp->connected)	
+	if(tcp->connected)
 	{
 		if(uv_is_active((uv_handle_t *)&tx->socket))
 		{
@@ -1292,7 +1322,7 @@ _ser_init(uv_loop_t *loop, osc_stream_t *stream, int fd)
 		if((err = uv_read_start((uv_stream_t *)&ser->socket, _ser_slip_alloc, _ser_slip_recv_cb)))
 			goto fail;
 	}
-			
+
 	_instant_msg(stream, OSC_STREAM_MESSAGE_CONNECT);
 
 	return;
@@ -1402,7 +1432,7 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 	if(!strncmp(addr, "osc.udp", 7))
 	{
 		addr += 7;
-			
+
 		stream->type = OSC_STREAM_TYPE_UDP;
 
 		if(!strncmp(addr, "://", 3))
@@ -1426,7 +1456,7 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 	else if(!strncmp(addr, "osc.tcp", 7))
 	{
 		addr += 7;
-			
+
 		stream->type = OSC_STREAM_TYPE_TCP;
 		stream->tcp.slip = 0;
 
@@ -1451,7 +1481,7 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 	else if(!strncmp(addr, "osc.slip.tcp", 12))
 	{
 		addr += 12;
-		
+
 		stream->type = OSC_STREAM_TYPE_TCP;
 		stream->tcp.slip = 1;
 
@@ -1483,7 +1513,7 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 	else if(!strncmp(addr, "osc.slip.serial://", 18))
 	{
 		addr += 18;
-		
+
 		stream->type = OSC_STREAM_TYPE_SERIAL;
 		stream->ser.slip = 1;
 	}
@@ -1504,7 +1534,7 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 		{
 			osc_stream_udp_t* udp = &stream->udp;
 			const char *service = strchr(url, ':');
-				
+
 			if(!service)
 			{
 				return UV_ENXIO;
@@ -1593,16 +1623,28 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 			{
 				return UV_ENXIO;
 			}
-		
+
 			int fd;
 #if defined(__WINDOWS__)
 			if( (fd = open(url, 0, 0)) < 0)
 #else
-			if( (fd = open(url, O_RDWR | O_NOCTTY | O_NONBLOCK, 0)) < 0)
+			if( (fd = open(url, O_RDWR | O_NOCTTY | O_NDELAY | O_NONBLOCK, 0)) < 0)
 #endif
 			{
 				return UV_ENXIO;
 			}
+
+			// raw serial
+			struct termios toptions;
+			tcgetattr(fd, &toptions);
+			toptions.c_iflag &= ~(BRKINT|PARMRK|IGNPAR|ISTRIP|INLCR|IGNCR|ICRNL|IXON|IXOFF|IXANY|INPCK);
+			toptions.c_iflag |= (IGNBRK);
+			toptions.c_oflag &= ~(OPOST);
+			toptions.c_lflag &= ~(ICANON|ECHO|ECHOE|ECHONL|ISIG|IEXTEN);
+			toptions.c_cflag &= ~(PARENB|CSTOPB|CSIZE);
+			toptions.c_cflag |= (CS8|CLOCAL);
+			tcsetattr(fd, TCSANOW, &toptions);
+			tcflush(fd, TCOFLUSH);
 
 			// check if file can be used as serial device
 			uv_handle_type type = uv_guess_handle(fd);
@@ -1622,7 +1664,7 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 }
 
 static inline osc_stream_t *
-osc_stream_new(uv_loop_t *loop, const char *addr, 
+osc_stream_new(uv_loop_t *loop, const char *addr,
 	const osc_stream_driver_t *driver, void *data)
 {
 	if(  !driver
