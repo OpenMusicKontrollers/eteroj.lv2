@@ -447,7 +447,7 @@ osc_blobsize(const osc_data_t *buf)
 static inline size_t
 osc_bloblen(const osc_data_t *buf)
 {
-	return 4 + osc_blobsize(buf);
+	return 4 + OSC_PADDED_SIZE(osc_blobsize(buf));
 }
 
 // get OSC arguments from raw buffer
