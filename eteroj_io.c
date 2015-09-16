@@ -75,6 +75,7 @@ struct _plughandle_t {
 
 	osc_forge_t oforge;
 	LV2_Atom_Forge forge;
+	LV2_Atom_Forge_Ref ref;
 
 	volatile int needs_flushing;
 	volatile int restored;
@@ -479,7 +480,10 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 	if(!handle->data.frame_cnt) // message not in a bundle
 		lv2_atom_forge_frame_time(forge, 0);
 
-	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
+	LV2_Atom_Forge_Ref ref = handle->ref;
+
+	if(ref)
+		ref = osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
 	for(const char *type = fmt; *type; type++)
 		switch(*type)
@@ -488,14 +492,16 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			{
 				int32_t i;
 				ptr = osc_get_int32(ptr, &i);
-				osc_forge_int32(&handle->oforge, forge, i);
+				if(ref)
+					ref = osc_forge_int32(&handle->oforge, forge, i);
 				break;
 			}
 			case 'f':
 			{
 				float f;
 				ptr = osc_get_float(ptr, &f);
-				osc_forge_float(&handle->oforge, forge, f);
+				if(ref)
+					ref = osc_forge_float(&handle->oforge, forge, f);
 				break;
 			}
 			case 's':
@@ -503,14 +509,16 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			{
 				const char *s;
 				ptr = osc_get_string(ptr, &s);
-				osc_forge_string(&handle->oforge, forge, s);
+				if(ref)
+					ref = osc_forge_string(&handle->oforge, forge, s);
 				break;
 			}
 			case 'b':
 			{
 				osc_blob_t b;
 				ptr = osc_get_blob(ptr, &b);
-				osc_forge_blob(&handle->oforge, forge, b.size, b.payload);
+				if(ref)
+					ref = osc_forge_blob(&handle->oforge, forge, b.size, b.payload);
 				break;
 			}
 
@@ -518,21 +526,24 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			{
 				int64_t h;
 				ptr = osc_get_int64(ptr, &h);
-				osc_forge_int64(&handle->oforge, forge, h);
+				if(ref)
+					ref = osc_forge_int64(&handle->oforge, forge, h);
 				break;
 			}
 			case 'd':
 			{
 				double d;
 				ptr = osc_get_double(ptr, &d);
-				osc_forge_double(&handle->oforge, forge, d);
+				if(ref)
+					ref = osc_forge_double(&handle->oforge, forge, d);
 				break;
 			}
 			case 't':
 			{
 				uint64_t t;
 				ptr = osc_get_timetag(ptr, &t);
-				osc_forge_timestamp(&handle->oforge, forge, t);
+				if(ref)
+					ref = osc_forge_timestamp(&handle->oforge, forge, t);
 				break;
 			}
 
@@ -548,19 +559,24 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 			{
 				char c;
 				ptr = osc_get_char(ptr, &c);
-				osc_forge_char(&handle->oforge, forge, c);
+				if(ref)
+					ref = osc_forge_char(&handle->oforge, forge, c);
 				break;
 			}
 			case 'm':
 			{
 				const uint8_t *m;
 				ptr = osc_get_midi(ptr, &m);
-				osc_forge_midi(&handle->oforge, forge, 3, m + 1); // skip port byte
+				if(ref)
+					ref = osc_forge_midi(&handle->oforge, forge, 3, m + 1); // skip port byte
 				break;
 			}
 		}
 
-	osc_forge_message_pop(&handle->oforge, forge, frame);
+	if(ref)
+		osc_forge_message_pop(&handle->oforge, forge, frame);
+
+	handle->ref = ref;
 
 	return 1;
 }
@@ -903,7 +919,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	// prepare sequence forges
 	capacity = handle->osc_out->atom.size;
 	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->osc_out, capacity);
-	lv2_atom_forge_sequence_head(forge, &frame, 0);
+	handle->ref = lv2_atom_forge_sequence_head(forge, &frame, 0);
 
 	// write outgoing data
 	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
@@ -1019,13 +1035,16 @@ run(LV2_Handle instance, uint32_t nsamples)
 			continue;
 		}
 
-		lv2_atom_forge_frame_time(forge, l->frames);
-		//TODO check return
-		osc_forge_bundle_push(&handle->oforge, forge,
-			handle->data.frame[handle->data.frame_cnt++], time);
-		osc_dispatch_method(l->buf, l->size, methods, NULL, NULL, handle);
-		osc_forge_bundle_pop(&handle->oforge, forge,
-			handle->data.frame[--handle->data.frame_cnt]);
+		if(handle->ref)
+			handle->ref = lv2_atom_forge_frame_time(forge, l->frames);
+		if(handle->ref)
+			handle->ref = osc_forge_bundle_push(&handle->oforge, forge,
+				handle->data.frame[handle->data.frame_cnt++], time);
+		if(handle->ref)
+			osc_dispatch_method(l->buf, l->size, methods, NULL, NULL, handle);
+		if(handle->ref)
+			osc_forge_bundle_pop(&handle->oforge, forge,
+				handle->data.frame[--handle->data.frame_cnt]);
 
 		list_t *l0 = l;
 		l = l->next;
@@ -1080,7 +1099,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 		handle->status_updated = 0;
 	}
 
-	lv2_atom_forge_pop(forge, &frame);
+	if(handle->ref)
+		lv2_atom_forge_pop(forge, &frame);
 
 	if(handle->restored)
 	{
