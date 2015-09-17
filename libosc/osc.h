@@ -272,8 +272,8 @@ _unroll_partial(osc_data_t *buf, size_t size, const osc_unroll_inject_t *inject,
 	ptr = buf + 16; // skip bundle header
 	while(ptr < end)
 	{
-		int32_t *size = (int32_t *)ptr;
-		int32_t hsize = be32toh(*size);
+		int32_t *nsize = (int32_t *)ptr;
+		int32_t hsize = be32toh(*nsize);
 		ptr += sizeof(int32_t);
 
 		char c = *(char *)ptr;
@@ -310,8 +310,8 @@ _unroll_partial(osc_data_t *buf, size_t size, const osc_unroll_inject_t *inject,
 	osc_data_t *dst = ptr;
 	while(ptr < end)
 	{
-		int32_t *size = (int32_t *)ptr;
-		int32_t hsize = be32toh(*size);
+		int32_t *nsize = (int32_t *)ptr;
+		int32_t hsize = be32toh(*nsize);
 		ptr += sizeof(int32_t);
 
 		char *c = (char *)ptr;
@@ -348,8 +348,8 @@ _unroll_full(const osc_data_t *buf, size_t size, const osc_unroll_inject_t *inje
 	ptr = buf + 16; // skip bundle header
 	while(ptr < end)
 	{
-		const int32_t *size = (const int32_t *)ptr;
-		int32_t hsize = be32toh(*size);
+		const int32_t *nsize = (const int32_t *)ptr;
+		int32_t hsize = be32toh(*nsize);
 		ptr += sizeof(int32_t);
 
 		char c = *(const char *)ptr;
@@ -375,8 +375,8 @@ _unroll_full(const osc_data_t *buf, size_t size, const osc_unroll_inject_t *inje
 	ptr = buf + 16; // skip bundle header
 	while(ptr < end)
 	{
-		const int32_t *size = (const int32_t *)ptr;
-		int32_t hsize = be32toh(*size);
+		const int32_t *nsize = (const int32_t *)ptr;
+		int32_t hsize = be32toh(*nsize);
 		ptr += sizeof(int32_t);
 
 		const char *c = (const char *)ptr;
