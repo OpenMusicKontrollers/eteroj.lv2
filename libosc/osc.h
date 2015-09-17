@@ -837,7 +837,6 @@ _osc_method_dispatch_message(uint64_t time, const osc_data_t *buf, size_t size,
 	const osc_method_t *methods, void *data)
 {
 	const osc_data_t *ptr = buf;
-	const osc_data_t *end = buf + size;
 
 	const char *path;
 	const char *fmt;
