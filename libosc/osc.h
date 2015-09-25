@@ -715,8 +715,8 @@ osc_check_message(const osc_data_t *buf, size_t size)
 	const osc_data_t *ptr = buf;
 	const osc_data_t *end = buf + size;
 
-	const char *path;
-	const char *fmt;
+	const char *path = NULL;
+	const char *fmt = NULL;
 
 	ptr = osc_get_path(ptr, &path);
 	if( (ptr > end) || !osc_check_path(path) )
@@ -838,8 +838,8 @@ _osc_method_dispatch_message(uint64_t time, const osc_data_t *buf, size_t size,
 {
 	const osc_data_t *ptr = buf;
 
-	const char *path;
-	const char *fmt;
+	const char *path = NULL;
+	const char *fmt = NULL;
 
 	ptr = osc_get_path(ptr, &path);
 	ptr = osc_get_fmt(ptr, &fmt);
