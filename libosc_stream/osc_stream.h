@@ -1115,10 +1115,13 @@ _tcp_flush(osc_stream_t *stream)
 	if(stream->flushing) // already flushing?
 		return;
 
-	if(!uv_is_active((uv_handle_t *)&tx->socket))
+	if(tcp->connected)
 	{
-		_instant_err(stream, "_tcp_flush", UV_EAGAIN);
-		return;
+		if(!uv_is_active((uv_handle_t *)&tx->socket))
+		{
+			_instant_err(stream, "_tcp_flush", UV_EAGAIN);
+			return;
+		}
 	}
 
 	uv_buf_t *msg = tcp->duplex.msg;
