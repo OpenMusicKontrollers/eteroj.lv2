@@ -246,7 +246,9 @@ slip_decode(char *dst_buf, const char *src_buf, size_t len, size_t *size)
 			else if(*src == SLIP_ESC_REPLACE)
 				*dst++ = SLIP_ESC;
 			else
+			{
 				; //TODO error
+			}
 			src++;
 		}
 		else if(*src == SLIP_END)
@@ -679,7 +681,7 @@ _duplex_prefix_recv_cb(const osc_stream_t *stream, osc_stream_duplex_t *duplex,
 	{
 		duplex->nchunk = ntohl(*(int32_t *)buf->base);
 	}
-	else if(nread == duplex->nchunk)
+	else if(nread == (ssize_t)duplex->nchunk)
 	{
 		driver->recv_adv(nread, stream->data);
 		duplex->nchunk = sizeof(int32_t);
