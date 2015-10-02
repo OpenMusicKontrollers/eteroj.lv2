@@ -999,12 +999,15 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	// reschedule scheduled bundles
 	list_t *l;
-	for(l = handle->list; l; l = l->next)
+	if(handle->osc_sched)
 	{
-		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
+		for(l = handle->list; l; l = l->next)
+		{
+			uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
 
-		int64_t frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
-		l->frames = frames;
+			int64_t frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
+			l->frames = frames;
+		}
 	}
 
 	// read incoming data
