@@ -998,15 +998,17 @@ run(LV2_Handle instance, uint32_t nsamples)
 		handle->needs_flushing = 1;
 
 	// reschedule scheduled bundles
-	list_t *l;
 	if(handle->osc_sched)
 	{
-		for(l = handle->list; l; l = l->next)
+		for(list_t *l = handle->list; l; l = l->next)
 		{
 			uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
 
 			int64_t frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
-			l->frames = frames;
+			if(frames < 0) // we may occasionally get -1 frames events when rescheduling
+				l->frames = 0;
+			else
+				l->frames = frames;
 		}
 	}
 
@@ -1022,11 +1024,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 	}
 
 	// handle scheduled bundles
-	for(l = handle->list; l; )
+	for(list_t *l = handle->list; l; )
 	{
-		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
-		//lprintf(handle, handle->uris.log_trace, "frames: %lu, %lu", time, l->frames);
-
 		if(l->frames < 0) // late event
 		{
 			lprintf(handle, handle->uris.log_trace, "late event: %li samples", l->frames);
@@ -1034,9 +1033,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 		}
 		else if(l->frames >= nsamples) // not scheduled for this period
 		{
-			l = l->next;
-			continue;
+			break;
 		}
+
+		uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
 
 		if(handle->ref)
 			handle->ref = lv2_atom_forge_frame_time(forge, l->frames);
