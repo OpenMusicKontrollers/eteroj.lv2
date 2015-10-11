@@ -8,6 +8,7 @@ include_directories(${PROJECT_SOURCE_DIR}/libosc_stream)
 include_directories(${PROJECT_SOURCE_DIR}/osc.lv2)
 include_directories(${PROJECT_SOURCE_DIR}/varchunk)
 include_directories(${PROJECT_SOURCE_DIR}/tlsf-3.0)
+include_directories(${PROJECT_SOURCE_DIR}/jsmn)
 include_directories(${PROJECT_BINARY_DIR})
 
 set(CMAKE_C_FLAGS "-std=gnu99 -Wextra -Wno-unused-parameter -ffast-math -fvisibility=hidden ${CMAKE_C_FLAGS}")
@@ -41,7 +42,9 @@ add_library(eteroj MODULE
 	eteroj.c
 	eteroj_io.c
 	eteroj_disk.c
-	tlsf-3.0/tlsf.c)
+	eteroj_query.c
+	tlsf-3.0/tlsf.c
+	jsmn/jsmn.c)
 target_link_libraries(eteroj ${LIBS})
 if(WIN32)
 	target_link_libraries(eteroj "-lws2_32")

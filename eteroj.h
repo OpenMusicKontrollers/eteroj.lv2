@@ -45,8 +45,10 @@
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"
 #define ETEROJ_DISK_URI								ETEROJ_URI"#disk"
+#define ETEROJ_QUERY_URI							ETEROJ_URI"#query"
 
 extern const LV2_Descriptor eteroj_io;
 extern const LV2_Descriptor eteroj_disk;
+extern const LV2_Descriptor eteroj_query;
 
 #endif // _ETEROJ_LV2_H

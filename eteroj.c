@@ -31,6 +31,8 @@ lv2_descriptor(uint32_t index)
 			return &eteroj_io;
 		case 1:
 			return &eteroj_disk;
+		case 2:
+			return &eteroj_query;
 		default:
 			return NULL;
 	}
