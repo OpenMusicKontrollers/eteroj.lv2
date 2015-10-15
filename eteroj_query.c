@@ -49,8 +49,11 @@ struct _plughandle_t {
 		LV2_URID rdfs_label;
 		LV2_URID rdfs_range;
 
+		LV2_URID rdf_value;
+
 		LV2_URID lv2_minimum;
 		LV2_URID lv2_maximum;
+		LV2_URID lv2_scale_point;
 	} urid;
 
 	osc_forge_t oforge;
@@ -136,10 +139,15 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->urid.rdfs_range = handle->map->map(handle->map->handle,
 		"http://www.w3.org/2000/01/rdf-schema#range");
 
+	handle->urid.rdf_value = handle->map->map(handle->map->handle,
+		"http://www.w3.org/1999/02/22-rdf-syntax-ns#value");
+
 	handle->urid.lv2_minimum = handle->map->map(handle->map->handle,
 		LV2_CORE__minimum);
 	handle->urid.lv2_maximum = handle->map->map(handle->map->handle,
 		LV2_CORE__maximum);
+	handle->urid.lv2_scale_point = handle->map->map(handle->map->handle,
+		LV2_CORE__scalePoint);
 
 	handle->cnt = 0;
 
@@ -222,7 +230,8 @@ json_bool(const char *json, jsmntok_t *tok)
 
 static void
 _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
-	float *range, LV2_URID property, const char *label, uint32_t label_len)
+	const char *json, int range_cnt, jsmntok_t *range, int values_cnt, jsmntok_t *values,
+	LV2_URID property, const char *label, uint32_t label_len)
 {
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame obj_frame;
@@ -237,13 +246,30 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 	LV2_URID _type = forge->Int;
 	if(type == 'i')
 		_type = forge->Int;
+	if(type == 'h')
+		_type = forge->Long;
 	else if(type == 'f')
 		_type = forge->Float;
+	else if(type == 'd')
+		_type = forge->Double;
 	else if(type == 's')
 		_type = forge->String;
+	//TODO do other types
 
-	if( (_type == forge->Int) && (range[0] == 0.f) && (range[1] == 1.f) )
-		_type = forge->Bool;
+	jsmntok_t *mintok = NULL;
+	jsmntok_t *maxtok = NULL;
+	float min = 0.f;
+	float max = 1.f;
+
+	if(range_cnt && range)
+	{
+		mintok = &range[0];
+		maxtok = &range[1];
+		min = atof(&json[mintok->start]);
+		max = atof(&json[maxtok->start]);
+		if( (_type == forge->Int) && (min == 0.f) && (max == 1.f) )
+			_type = forge->Bool;
+	}
 
 	lv2_atom_forge_frame_time(forge, frame_time);
 	lv2_atom_forge_object(forge, &obj_frame, 0, handle->urid.patch_patch);
@@ -292,6 +318,9 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 
 			lv2_atom_forge_key(forge, handle->urid.lv2_maximum);
 			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
+
+			lv2_atom_forge_key(forge, handle->urid.lv2_scale_point);
+			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
 		}
 		lv2_atom_forge_pop(forge, &remove_frame);
 		
@@ -307,20 +336,70 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 
 			lv2_atom_forge_key(forge, handle->urid.rdfs_range);
 			lv2_atom_forge_urid(forge, _type);
-		
-			if( (_type == forge->Int) || (_type == forge->Float) )
+	
+			if(mintok && (_type != forge->Bool) )
 			{
 				lv2_atom_forge_key(forge, handle->urid.lv2_minimum);
 				if(_type == forge->Int)
-					lv2_atom_forge_int(forge, range[0]);
+					lv2_atom_forge_int(forge, min);
+				else if(_type == forge->Long)
+					lv2_atom_forge_long(forge, min);
+				else if(_type == forge->Float)
+					lv2_atom_forge_float(forge, min);
+				else if(_type == forge->Double)
+					lv2_atom_forge_double(forge, min);
 				else
-					lv2_atom_forge_float(forge, range[0]);
+					lv2_atom_forge_atom(forge, 0, 0); // blank
+				//TODO do other types
+			}
 
+			if(maxtok && (_type != forge->Bool) )
+			{
 				lv2_atom_forge_key(forge, handle->urid.lv2_maximum);
 				if(_type == forge->Int)
-					lv2_atom_forge_int(forge, range[1]);
+					lv2_atom_forge_int(forge, max);
+				else if(_type == forge->Long)
+					lv2_atom_forge_long(forge, max);
+				else if(_type == forge->Float)
+					lv2_atom_forge_float(forge, max);
+				else if(_type == forge->Double)
+					lv2_atom_forge_double(forge, max);
 				else
-					lv2_atom_forge_float(forge, range[1]);
+					lv2_atom_forge_atom(forge, 0, 0); // blank
+				//TODO do other types
+			}
+
+			if(values_cnt && values)
+			{
+				//iterate over all scale_points
+				for(int i=0; i<values_cnt; i++)
+				{
+					jsmntok_t *tok = &values[i];
+
+					lv2_atom_forge_key(forge, handle->urid.lv2_scale_point);
+					LV2_Atom_Forge_Frame scale_point_frame;
+					lv2_atom_forge_object(forge, &scale_point_frame, 0, 0);
+					{
+						lv2_atom_forge_key(forge, handle->urid.rdfs_label);
+						lv2_atom_forge_string(forge, &json[tok->start], tok->end - tok->start);
+
+						lv2_atom_forge_key(forge, handle->urid.rdf_value);
+						if(_type == forge->Int)
+							lv2_atom_forge_int(forge, atoi(&json[tok->start]));
+						else if(_type == forge->Long)
+							lv2_atom_forge_long(forge, atoi(&json[tok->start]));
+						else if(_type == forge->Float)
+							lv2_atom_forge_float(forge, atof(&json[tok->start]));
+						else if(_type == forge->Double)
+							lv2_atom_forge_double(forge, atof(&json[tok->start]));
+						else if(_type == forge->String)
+							lv2_atom_forge_string(forge, &json[tok->start], tok->end - tok->start);
+						else
+							lv2_atom_forge_atom(forge, 0, 0); // blank
+						//TODO do other types
+					}
+					lv2_atom_forge_pop(forge, &scale_point_frame);
+				}
 			}
 		}
 		lv2_atom_forge_pop(forge, &add_frame);
@@ -393,7 +472,10 @@ _message_cb(const char *path, const char *fmt,
 			char arg_type = 'i';
 			bool arg_read = true;
 			bool arg_write = false;
-			float arg_range [3] = {0.f, 10.f, 1.f};
+			int arg_range_cnt = 0;	
+			jsmntok_t *arg_range = NULL;
+			int arg_values_cnt = 0;
+			jsmntok_t *arg_values = NULL;
 
 			for(int i = 1; i < n_tokens; )
 			{
@@ -482,23 +564,22 @@ _message_cb(const char *path, const char *fmt,
 							}
 							else if(!json_eq(json, item_key, "range"))
 							{
+								arg_range_cnt = item_val->size;
+								arg_range = item_val + 1;
+
 								for(int n = 0; n < item_val->size; n++)
 								{
 									jsmntok_t *range = &t[i++]; 
-
-									if( (j == 0) && (n < 3) )
-									{
-										arg_range[n] = json_float(json, range);
-									}
 								}
 							}
 							else if(!json_eq(json, item_key, "values"))
 							{
+								arg_values_cnt = item_val->size;
+								arg_values = item_val + 1;
+
 								for(int n = 0; n < item_val->size; n++)
 								{
 									jsmntok_t *val = &t[i++]; 
-
-									//FIXME
 								}
 							}
 						}
@@ -514,8 +595,8 @@ _message_cb(const char *path, const char *fmt,
 				dest[target_len] = 0;
 				LV2_URID property = handle->map->map(handle->map->handle, dest);
 
-				_add(handle, 0, arg_type, arg_read, arg_write, arg_range, property,
-					target, target_len);
+				_add(handle, 0, arg_type, arg_read, arg_write, json, arg_range_cnt, arg_range,
+					arg_values_cnt, arg_values, property, target, target_len);
 			}
 		}
 		else
