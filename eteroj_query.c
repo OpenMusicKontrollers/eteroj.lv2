@@ -236,7 +236,10 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame obj_frame;
 
-	if(!read) //FIXME
+	if(write && !read) //TODO handle this
+		return;
+
+	if(!range_cnt && !values_cnt) //TODO handle this
 		return;
 
 	LV2_URID access = write
