@@ -22,12 +22,18 @@
 extern "C" {
 #endif
 
+#if (defined(_WIN16) || defined(_WIN32) || defined(_WIN64)) && !defined(__WINDOWS__)
+#	define __WINDOWS__
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <uv.h>
-#include <termios.h>
+#ifndef __WINDOWS__
+#	include <termios.h>
+#endif
 
 /*****************************************************************************
  * API START
@@ -83,14 +89,18 @@ typedef struct _osc_stream_udp_tx_t osc_stream_udp_tx_t;
 typedef struct _osc_stream_duplex_t osc_stream_duplex_t;
 typedef struct _osc_stream_tcp_t osc_stream_tcp_t;
 typedef struct _osc_stream_tcp_tx_t osc_stream_tcp_tx_t;
+#ifndef __WINDOWS__
 typedef struct _osc_stream_ser_t osc_stream_ser_t;
+#endif
 
 typedef union _osc_stream_addr_t osc_stream_addr_t;
 
 enum _osc_stream_type_t {
 	OSC_STREAM_TYPE_UDP,
 	OSC_STREAM_TYPE_TCP,
+#ifndef __WINDOWS__
 	OSC_STREAM_TYPE_SERIAL
+#endif
 };
 
 enum _osc_stream_ip_version_t {
@@ -149,6 +159,7 @@ struct _osc_stream_tcp_t {
 	osc_stream_duplex_t duplex;
 };
 
+#ifndef __WINDOWS__
 struct _osc_stream_ser_t {
 	int slip;
 	uv_pipe_t socket;
@@ -158,6 +169,7 @@ struct _osc_stream_ser_t {
 
 	osc_stream_duplex_t duplex;
 };
+#endif
 
 struct _osc_stream_t {
 	osc_stream_type_t type;
@@ -168,7 +180,9 @@ struct _osc_stream_t {
 	union {
 		osc_stream_udp_t udp;
 		osc_stream_tcp_t tcp;
+#ifndef __WINDOWS__
 		osc_stream_ser_t ser;
+#endif
 	};
 };
 
@@ -284,7 +298,7 @@ typedef enum _osc_stream_message_t {
 	OSC_STREAM_MESSAGE_DISCONNECT
 } osc_stream_message_t;
 
-#if defined(__WINDOWS__)
+#ifdef __WINDOWS__
 static inline char *
 strndup(const char *s, size_t n)
 {
@@ -603,7 +617,13 @@ _udp_flush(osc_stream_t *stream)
 	}
 
 	uv_buf_t *msg = &udp->tx.msg;
+#ifdef __WINDOWS__
+	size_t _len;
+	msg->base = (char *)driver->send_req(&_len, stream->data);
+	msg->len = _len;
+#else
 	msg->base = (char *)driver->send_req(&msg->len, stream->data);
+#endif
 
 	if(msg->base && (msg->len > 0))
 	{
@@ -1092,7 +1112,7 @@ _tcp_flush(osc_stream_t *stream);
 static inline void
 _tcp_send_cb(uv_write_t *req, int status)
 {
-	osc_stream_ser_t *tcp = req->data;
+	osc_stream_tcp_t *tcp = req->data;
 	osc_stream_t *stream = (void *)tcp - offsetof(osc_stream_t, tcp);
 	const osc_stream_driver_t *driver = stream->driver;
 
@@ -1128,7 +1148,13 @@ _tcp_flush(osc_stream_t *stream)
 
 	uv_buf_t *msg = tcp->duplex.msg;
 
+#ifdef __WINDOWS__
+	size_t _len;
+	msg[1].base = (char *)driver->send_req(&_len, stream->data);
+	msg[1].len = _len;
+#else
 	msg[1].base = (char *)driver->send_req(&msg[1].len, stream->data);
+#endif
 
 	if(msg[1].base && (msg[1].len > 0) )
 	{
@@ -1231,6 +1257,7 @@ _tcp_free(osc_stream_t *stream)
  * Serial implementation
  *****************************************************************************/
 
+#ifndef __WINDOWS__
 static inline void
 _ser_prefix_alloc(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
 {
@@ -1426,6 +1453,7 @@ _ser_free(osc_stream_t *stream)
 	if(ser->fd)
 		close(ser->fd);
 }
+#endif
 
 /*****************************************************************************
  * API implementation
@@ -1508,6 +1536,7 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 		else
 			return UV_EPROTO;
 	}
+#ifndef __WINDOWS__
 	else if(!strncmp(addr, "osc.serial://", 13))
 	{
 		addr += 13;
@@ -1522,6 +1551,7 @@ _parse_protocol(osc_stream_t *stream, const char *addr, const char **url)
 		stream->type = OSC_STREAM_TYPE_SERIAL;
 		stream->ser.slip = 1;
 	}
+#endif
 	else
 		return UV_EPROTO;
 
@@ -1619,6 +1649,7 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 
 			break;
 		}
+#ifndef __WINDOWS__
 		case OSC_STREAM_TYPE_SERIAL:
 		{
 			// check if file exists
@@ -1630,11 +1661,7 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 			}
 
 			int fd;
-#if defined(__WINDOWS__)
-			if( (fd = open(url, 0, 0)) < 0)
-#else
 			if( (fd = open(url, O_RDWR | O_NOCTTY | O_NDELAY | O_NONBLOCK, 0)) < 0)
-#endif
 			{
 				return UV_ENXIO;
 			}
@@ -1663,6 +1690,7 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 
 			break;
 		}
+#endif
 	}
 
 	return 0;
@@ -1724,9 +1752,11 @@ osc_stream_free(osc_stream_t *stream)
 		case OSC_STREAM_TYPE_TCP:
 			_tcp_free(stream);
 			break;
+#ifndef __WINDOWS__
 		case OSC_STREAM_TYPE_SERIAL:
 			_ser_free(stream);
 			break;
+#endif
 	}
 }
 
@@ -1744,9 +1774,11 @@ osc_stream_flush(osc_stream_t *stream)
 		case OSC_STREAM_TYPE_TCP:
 			_tcp_flush(stream);
 			break;
+#ifndef __WINDOWS__
 		case OSC_STREAM_TYPE_SERIAL:
 			_ser_flush(stream);
 			break;
+#endif
 	}
 }
 
