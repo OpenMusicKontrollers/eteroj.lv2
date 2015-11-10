@@ -77,6 +77,10 @@ osc_stream_flush(osc_stream_t *stream);
  * API END
  *****************************************************************************/
 
+#if (UV_VERSION_HEX >= ((1 << 16) | (3 << 8)))
+#	define HAS_SYNCHRONOUS_GETADDRINFO
+#endif
+
 /*****************************************************************************
  * private
  *****************************************************************************/
@@ -655,8 +659,10 @@ _udp_free(osc_stream_t *stream)
 	int err;
 	osc_stream_udp_t *udp = &stream->udp;
 
-	// cancel resolve
+#ifndef HAS_SYNCHRONOUS_GETADDRINFO
+	// cancel asynchronous resolve
 	uv_cancel((uv_req_t *)&udp->req);
+#endif
 
 	if(uv_is_active((uv_handle_t *)&udp->socket))
 	{
@@ -1211,8 +1217,10 @@ _tcp_free(osc_stream_t *stream)
 	int err;
 	osc_stream_tcp_t *tcp = &stream->tcp;
 
-	// cancel resolve
+#ifndef HAS_SYNCHRONOUS_GETADDRINFO
+	// cancel asynchronous resolve
 	uv_cancel((uv_req_t *)&tcp->req);
+#endif
 
 	// close clients
 	osc_stream_tcp_tx_t *tx = &stream->tcp.tx;
@@ -1587,7 +1595,12 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 					.ai_flags = 0
 				};
 
+#ifdef HAS_SYNCHRONOUS_GETADDRINFO
+				int status = uv_getaddrinfo(loop, &udp->req, NULL, node, service+1, &hints);
+				_getaddrinfo_udp_rx_cb(&udp->req, status, udp->req.addrinfo);
+#else
 				uv_getaddrinfo(loop, &udp->req, _getaddrinfo_udp_rx_cb, node, service+1, &hints);
+#endif
 			}
 			else // !udp->server
 			{
@@ -1601,7 +1614,12 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 					.ai_flags = 0
 				};
 
+#ifdef HAS_SYNCHRONOUS_GETADDRINFO
+				int status = uv_getaddrinfo(loop, &udp->req, NULL, node, service+1, &hints);
+				_getaddrinfo_udp_tx_cb(&udp->req, status, udp->req.addrinfo);
+#else
 				uv_getaddrinfo(loop, &udp->req, _getaddrinfo_udp_tx_cb, node, service+1, &hints);
+#endif
 				free(node);
 			}
 
@@ -1629,7 +1647,12 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 					.ai_flags = 0
 				};
 
+#ifdef HAS_SYNCHRONOUS_GETADDRINFO
+				int status = uv_getaddrinfo(loop, &tcp->req, NULL, node, service+1, &hints);
+				_getaddrinfo_tcp_rx_cb(&tcp->req, status, tcp->req.addrinfo);
+#else
 				uv_getaddrinfo(loop, &tcp->req, _getaddrinfo_tcp_rx_cb, node, service+1, &hints);
+#endif
 			}
 			else // !tcp->server
 			{
@@ -1643,7 +1666,12 @@ _parse_url(uv_loop_t *loop, osc_stream_t *stream, const char *url)
 					.ai_flags = 0
 				};
 
+#ifdef HAS_SYNCHRONOUS_GETADDRINFO
+				int status = uv_getaddrinfo(loop, &tcp->req, NULL, node, service+1, &hints);
+				_getaddrinfo_tcp_tx_cb(&tcp->req, status, tcp->req.addrinfo);
+#else
 				uv_getaddrinfo(loop, &tcp->req, _getaddrinfo_tcp_tx_cb, node, service+1, &hints);
+#endif
 				free(node);
 			}
 
