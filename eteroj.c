@@ -33,6 +33,10 @@ lv2_descriptor(uint32_t index)
 			return &eteroj_disk;
 		case 2:
 			return &eteroj_query;
+		case 3:
+			return &eteroj_cloak;
+		case 4:
+			return &eteroj_decloak;
 		default:
 			return NULL;
 	}

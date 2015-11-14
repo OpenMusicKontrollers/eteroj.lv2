@@ -43,6 +43,8 @@ add_library(eteroj MODULE
 	eteroj_io.c
 	eteroj_disk.c
 	eteroj_query.c
+	eteroj_cloak.c
+	eteroj_decloak.c
 	tlsf-3.0/tlsf.c
 	jsmn/jsmn.c)
 target_link_libraries(eteroj ${LIBS})
