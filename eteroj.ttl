@@ -66,11 +66,6 @@ eteroj:status
 	rdfs:label "Status" ;
 	rdfs:range atom:String .
 
-eteroj:path
-	a lv2:Parameter ;
-	rdfs:label "Path" ;
-	rdfs:range atom:Path .
-
 # IO Plugin
 eteroj:io
 	a lv2:Plugin ,
@@ -143,8 +138,6 @@ eteroj:disk
 	lv2:requiredFeature work:schedule, urid:map, state:makePath ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
-	patch:writable eteroj:path ;
-
 	lv2:port [
 		# sink event port
 	  a lv2:InputPort ,
@@ -178,16 +171,12 @@ eteroj:disk
 	  a lv2:InputPort ,
 			lv2:ControlPort ;
 		lv2:index 2 ;
-		lv2:symbol "state" ;
-		lv2:name "State" ;
-		lv2:default 1.0 ;
-		lv2:minimum 0.0 ;
-		lv2:maximum 2.0 ;
-		lv2:portProperty lv2:integer ;
-		lv2:portProperty lv2:enumeration ;
-		lv2:scalePoint [ rdfs:label "Play" ;					rdf:value 0 ] ;
-		lv2:scalePoint [ rdfs:label "Pause" ;					rdf:value 1 ] ;
-		lv2:scalePoint [ rdfs:label "Record" ;				rdf:value 2 ] ;
+		lv2:symbol "record" ;
+		lv2:name "Record" ;
+		lv2:default 1 ;
+		lv2:minimum 0 ;
+		lv2:maximum 1 ;
+		lv2:portProperty lv2:toggled;
 	] .
 
 # Query Plugin

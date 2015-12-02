@@ -33,8 +33,7 @@
 
 #define ETEROJ_URI										"http://open-music-kontrollers.ch/lv2/eteroj"
 
-#define ETEROJ_TRIG_URI								ETEROJ_URI"#trig"
-#define ETEROJ_DIRTY_URI							ETEROJ_URI"#dirty"
+#define ETEROJ_DRAIN_URI							ETEROJ_URI"#drain"
 
 #define ETEROJ_EVENT_URI							ETEROJ_URI"#event"
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"

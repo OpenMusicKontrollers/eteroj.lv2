@@ -17,446 +17,89 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <osc.h>
+#include <math.h>
 
 #include <eteroj.h>
+#include <timely.h>
 #include <varchunk.h>
 #include <lv2_osc.h>
+#include <osc.h>
 
 #define BUF_SIZE 0x10000
+#define DEFAULT_FILE_NAME "seq.osc"
 
-static const char magic [4] = {'O', 'S', 'C', 0x0};
-
-typedef enum _plugstate_t plugstate_t;
-typedef struct _header_t header_t;
-typedef struct _event_t event_t;
+typedef enum _jobtype_t jobtype_t;
+typedef struct _job_t job_t;
 typedef struct _plughandle_t plughandle_t;
 
-enum _plugstate_t {
-	STATE_PLAY					= 0,
-	STATE_PAUSE					= 1,
-	STATE_RECORD				= 2
+enum _jobtype_t {
+	JOB_PLAY				= 0,
+	JOB_RECORD			= 1,
+	JOB_SEEK				= 2,
+	JOB_OPEN_PLAY		= 3,
+	JOB_OPEN_RECORD	= 4,
+	JOB_DRAIN				= 5
 };
 
-struct _header_t {
-	char magic [4];
-	uint32_t sample_rate;
-} __attribute__((packed));
-
-struct _event_t {
-	uint32_t delta;
-
-	uint32_t size;
-	osc_data_t buf [0];
-} __attribute__((packed));
+struct _job_t {
+	jobtype_t type;
+	union {
+		double beats;
+	};
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
+	LV2_Atom_Forge forge;
+	osc_forge_t oforge;
 	struct {
 		LV2_URID eteroj_path;
+		LV2_URID eteroj_drain;
 	} uris;
 
-	struct {
-		int64_t play;
-		int64_t record;
-	} offset;
-
-	uint32_t sample_rate;
-	FILE *osc_file;
-	size_t write_ptr;
-	size_t read_ptr;
-	char osc_path [1024];
-	volatile int restored;
-
-	osc_forge_t oforge;
-	LV2_Atom_Forge forge;
-
-	const LV2_Atom_Sequence *osc_in;
-	LV2_Atom_Sequence *osc_out;
-	const float *state;
-	plugstate_t state_i;
-
+	timely_t timely;
 	LV2_Worker_Schedule *sched;
-	LV2_Worker_Respond_Function respond;
-	LV2_Worker_Respond_Handle target;
+	bool restored; //TODO use properly
 
-	struct {
-		varchunk_t *from_worker;
-		varchunk_t *to_worker;
+	const LV2_Atom_Sequence *event_in;
+	LV2_Atom_Sequence *event_out;
+	const float *record;
 
-		int frame_cnt;
-		LV2_Atom_Forge_Frame frame [32][2]; // 32 nested bundles should be enough
+	bool record_i;
 
-		osc_data_t *buf;
-		osc_data_t *ptr;
-		osc_data_t *end;
+	double beats_period;
+	double beats_upper;
 
-		int bndl_cnt;
-		osc_data_t *bndl [32]; // 32 nested bundles should be enough
-	} data;
+	bool rolling;
+	int draining;
+
+	char path [1024];
+	FILE *io;
+
+	double seek_beats;
+
+	varchunk_t *to_disk;
+	varchunk_t *from_disk;
+
+	int frame_cnt;
+	LV2_Atom_Forge_Frame frame [32][2]; // 32 nested bundles should be enough
+	int64_t offset;
+
+	osc_data_t *ptr;
+	osc_data_t *end;
+
+	int bndl_cnt;
+	osc_data_t *bndl [32]; // 32 nested bundles should be enough
 };
 
 static inline void
-_header_ntoh(header_t *header)
+_event_ntoh(LV2_Atom_Event *ev)
 {
-	header->sample_rate = be32toh(header->sample_rate);
-}
-#define _header_hton _header_ntoh
-
-static inline void
-_event_ntoh(event_t *event)
-{
-	event->delta = be32toh(event->delta);
-	event->size = be32toh(event->size);
+	ev->time.frames = be64toh(ev->time.frames);
+	ev->body.type = be32toh(ev->body.type);
+	ev->body.size = be32toh(ev->body.size);
 }
 #define _event_hton _event_ntoh
-
-static LV2_State_Status
-_state_save(LV2_Handle instance, LV2_State_Store_Function store,
-	LV2_State_Handle state, uint32_t flags,
-	const LV2_Feature *const *features)
-{
-	plughandle_t *handle = (plughandle_t *)instance;
-
-	const LV2_State_Map_Path *map_path = NULL;
-
-	for(int i=0; features[i]; i++)
-		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
-			map_path = features[i]->data;
-
-	if(!map_path)
-	{
-		fprintf(stderr, "_state_save: LV2_STATE__mapPath not supported.");
-		return LV2_STATE_ERR_UNKNOWN;
-	}
-
-	const char *abstract = map_path->abstract_path(map_path->handle, handle->osc_path);
-
-	return store(
-		state,
-		handle->uris.eteroj_path,
-		abstract,
-		strlen(abstract) + 1,
-		handle->forge.Path,
-		LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE);
-}
-
-static LV2_State_Status
-_state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
-	LV2_State_Handle state, uint32_t flags,
-	const LV2_Feature *const *features)
-{
-	plughandle_t *handle = (plughandle_t *)instance;
-
-	const LV2_State_Map_Path *map_path = NULL;
-
-	for(int i=0; features[i]; i++)
-		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
-			map_path = features[i]->data;
-
-	if(!map_path)
-	{
-		fprintf(stderr, "_state_restore: LV2_STATE__mapPath not supported.");
-		return LV2_STATE_ERR_UNKNOWN;
-	}
-
-	size_t size;
-	uint32_t type;
-	uint32_t flags2;
-	const char *osc_path = retrieve(
-		state,
-		handle->uris.eteroj_path,
-		&size,
-		&type,
-		&flags2
-	);
-
-	// check type
-	if(osc_path && (type != handle->forge.Path) )
-		return LV2_STATE_ERR_BAD_TYPE;
-
-	if(!osc_path)
-		osc_path = "dump.osc";
-
-	const char *absolute = map_path->absolute_path(map_path->handle, osc_path);
-
-	strcpy(handle->osc_path, absolute);
-	handle->restored = 1;
-
-	return LV2_STATE_SUCCESS;
-}
-
-static const LV2_State_Interface state_iface = {
-	.save = _state_save,
-	.restore = _state_restore
-};
-
-// non-rt
-static int
-_worker_api_path(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-	const osc_data_t *ptr = buf;
-
-	printf("_worker_api_path\n");
-
-	const char *osc_path;
-	ptr = osc_get_string(ptr, &osc_path);
-
-	strcpy(handle->osc_path, osc_path);
-	handle->read_ptr = sizeof(header_t);
-	handle->write_ptr = sizeof(header_t);
-
-	if(handle->osc_file)
-	{
-		fflush(handle->osc_file);
-		fclose(handle->osc_file);
-	}
-	handle->osc_file = fopen(handle->osc_path, "a+b");
-	if(!handle->osc_file)
-		return 1;
-
-	fseek(handle->osc_file, 0, SEEK_SET);
-
-	header_t header;
-	if(fread(&header, sizeof(header_t), 1, handle->osc_file) == 1)
-	{
-		printf("reading header\n;");
-		_header_ntoh(&header);
-		assert(!strcmp(header.magic, magic));
-		assert(header.sample_rate == handle->sample_rate);
-	}
-	else
-	{
-		printf("writing header\n;");
-		strcpy(header.magic, magic);
-		header.sample_rate = handle->sample_rate;
-		_header_hton(&header);
-		assert(fwrite(&header, sizeof(header_t), 1, handle->osc_file) == 1);
-		fflush(handle->osc_file);
-	}
-
-	return 1;
-}
-
-// non-rt
-static int
-_worker_api_record(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-
-	if(!handle->osc_file)
-		return 1;
-
-	//printf("_worker_api_record\n");
-
-	fseek(handle->osc_file, handle->write_ptr, SEEK_SET);
-
-	event_t *ev;
-	size_t len;
-	while((ev = (event_t *)varchunk_read_request(handle->data.to_worker, &len)))
-	{
-		_event_hton(ev);
-
-		if(handle->write_ptr == sizeof(header_t)) // first event to write
-			ev->delta = 0;
-
-		if(fwrite(ev, len, 1, handle->osc_file) != 1)
-		{
-			_event_ntoh(ev); // revert byteswap, event was not written to disk
-			break;
-		}
-
-		varchunk_read_advance(handle->data.to_worker);
-	}
-
-	fflush(handle->osc_file);
-	handle->write_ptr = ftell(handle->osc_file);
-
-	return 1;
-}
-
-// non-rt
-static int
-_worker_api_play(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-
-	if(!handle->osc_file)
-		return 1;
-
-	//printf("_worker_api_play\n");
-
-	fseek(handle->osc_file, handle->read_ptr, SEEK_SET);
-
-	int complete = 1;
-
-	// read as many events as possible from disk and add to ringbuffer
-	while(!feof(handle->osc_file))
-	{
-		event_t ev;
-		if(fread(&ev, sizeof(event_t), 1, handle->osc_file) != 1)
-			break;
-		_event_ntoh(&ev);
-
-		complete = 0;
-
-		void *ptr;
-		const size_t len = sizeof(event_t) + ev.size;
-		if((ptr = varchunk_write_request(handle->data.from_worker, len)))
-		{
-			memcpy(ptr, &ev, sizeof(event_t));
-			if(fread(ptr + sizeof(event_t), ev.size, 1, handle->osc_file) != 1)
-				break;
-
-			varchunk_write_advance(handle->data.from_worker, len);
-			complete = 1;
-		}
-		else
-			break;
-	}
-
-	handle->read_ptr = ftell(handle->osc_file);
-	if(!complete)
-		handle->read_ptr -= sizeof(event_t);
-
-	return 1;
-}
-
-// non-rt
-static int
-_worker_api_pause(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-
-	if(!handle->osc_file)
-		return 1;
-
-	//printf("_worker_api_pause\n");
-
-	handle->read_ptr = sizeof(header_t);
-	handle->write_ptr = sizeof(header_t);
-
-	return 1;
-}
-
-// non-rt
-static int
-_worker_api_clear(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-
-	if(!handle->osc_file)
-		return 1;
-
-	printf("_worker_api_clear\n");
-
-	handle->osc_file = freopen(NULL, "w+b", handle->osc_file);
-	if(handle->osc_file)
-	{
-		header_t header;
-		printf("writing header\n;");
-		strcpy(header.magic, magic);
-		header.sample_rate = handle->sample_rate;
-		_header_hton(&header);
-		assert(fwrite(&header, sizeof(header_t), 1, handle->osc_file) == 1);
-		fflush(handle->osc_file);
-	}
-
-	handle->read_ptr = sizeof(header_t);
-	handle->write_ptr = sizeof(header_t);
-
-	return 1;
-}
-
-// non-rt
-static int
-_worker_api_rewind(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-
-	if(!handle->osc_file)
-		return 1;
-
-	printf("_worker_api_rewind\n");
-
-	handle->read_ptr = sizeof(header_t);
-
-	return 1;
-}
-
-static const char play_msg [] = "/eteroj/play\0\0\0\0,\0\0\0";
-static const char pause_msg [] = "/eteroj/pause\0\0\0,\0\0\0";
-static const char record_msg [] = "/eteroj/record\0\0,\0\0\0";
-static const char clear_msg [] = "/eteroj/clear\0\0\0,\0\0\0";
-static const char rewind_msg [] = "/eteroj/rewind\0\0,\0\0\0";
-
-static const osc_method_t worker_api [] = {
-	{"/eteroj/play", "", _worker_api_play},
-	{"/eteroj/pause", "", _worker_api_pause},
-	{"/eteroj/record", "", _worker_api_record},
-	{"/eteroj/clear", "", _worker_api_clear},
-	{"/eteroj/rewind", "", _worker_api_rewind},
-	{"/eteroj/path", "s", _worker_api_path},
-
-	{NULL, NULL, NULL}
-};
-
-// non-rt thread
-static LV2_Worker_Status
-_work(LV2_Handle instance,
-	LV2_Worker_Respond_Function respond,
-	LV2_Worker_Respond_Handle target,
-	uint32_t size,
-	const void *body)
-{
-	plughandle_t *handle = instance;
-
-	handle->respond = respond;
-	handle->target = target;
-
-	osc_dispatch_method(body, size, worker_api, NULL, NULL, handle);
-
-	handle->respond = NULL;
-	handle->target = NULL;
-
-	return LV2_WORKER_SUCCESS;
-}
-
-// rt-thread
-static LV2_Worker_Status
-_work_response(LV2_Handle instance, uint32_t size, const void *body)
-{
-	plughandle_t *handle = instance;
-
-	// do nothing
-
-	return LV2_WORKER_SUCCESS;
-}
-
-// rt-thread
-static LV2_Worker_Status
-_end_run(LV2_Handle instance)
-{
-	plughandle_t *handle = instance;
-
-	// do nothing
-
-	return LV2_WORKER_SUCCESS;
-}
-
-static const LV2_Worker_Interface work_iface = {
-	.work = _work,
-	.work_response = _work_response,
-	.end_run = _end_run
-};
 
 // rt
 static void
@@ -465,11 +108,11 @@ _bundle_in(osc_time_t timestamp, void *data)
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	if(!handle->data.frame_cnt) // no nested bundle
-		lv2_atom_forge_frame_time(forge, handle->offset.play);
+	if(!handle->frame_cnt) // no nested bundle
+		lv2_atom_forge_frame_time(forge, handle->offset);
 
 	osc_forge_bundle_push(&handle->oforge, forge,
-		handle->data.frame[handle->data.frame_cnt++], timestamp);
+		handle->frame[handle->frame_cnt++], timestamp);
 }
 
 static void
@@ -479,7 +122,7 @@ _bundle_out(osc_time_t timestamp, void *data)
 	LV2_Atom_Forge *forge = &handle->forge;
 
 	osc_forge_bundle_pop(&handle->oforge, forge,
-		handle->data.frame[--handle->data.frame_cnt]);
+		handle->frame[--handle->frame_cnt]);
 }
 
 // rt
@@ -493,8 +136,8 @@ _message(osc_time_t timestamp, const char *path, const char *fmt,
 
 	const osc_data_t *ptr = buf;
 
-	if(!handle->data.frame_cnt) // message not in a bundle
-		lv2_atom_forge_frame_time(forge, handle->offset.play);
+	if(!handle->frame_cnt) // message not in a bundle
+		lv2_atom_forge_frame_time(forge, handle->offset);
 
 	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
 
@@ -588,111 +231,14 @@ static const osc_method_t methods [] = {
 	{NULL, NULL, NULL}
 };
 
-static LV2_Handle
-instantiate(const LV2_Descriptor* descriptor, double rate,
-	const char *bundle_path, const LV2_Feature *const *features)
-{
-	int i;
-	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
-	if(!handle)
-		return NULL;
-
-	handle->sample_rate = rate;
-	handle->state_i = STATE_PAUSE;
-
-	const LV2_State_Make_Path *make_path = NULL;
-
-	for(i=0; features[i]; i++)
-		if(!strcmp(features[i]->URI, LV2_URID__map))
-			handle->map = features[i]->data;
-		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
-			handle->sched = features[i]->data;
-		else if(!strcmp(features[i]->URI, LV2_STATE__makePath))
-			make_path = features[i]->data;
-
-	if(!handle->map)
-	{
-		fprintf(stderr,
-			"%s: Host does not support urid:map\n", descriptor->URI);
-		free(handle);
-		return NULL;
-	}
-	if(!handle->sched)
-	{
-		fprintf(stderr,
-			"%s: Host does not support worker:sched\n", descriptor->URI);
-		free(handle);
-		return NULL;
-	}
-	if(!make_path)
-	{
-		fprintf(stderr,
-			"%s: Host does not support state:makePath\n", descriptor->URI);
-		free(handle);
-		return NULL;
-	}
-
-	handle->uris.eteroj_path = handle->map->map(handle->map->handle,
-		ETEROJ_PATH_URI);
-
-	osc_forge_init(&handle->oforge, handle->map);
-	lv2_atom_forge_init(&handle->forge, handle->map);
-
-	// init data
-	handle->data.from_worker = varchunk_new(BUF_SIZE);
-	handle->data.to_worker = varchunk_new(BUF_SIZE);
-	if(!handle->data.from_worker || !handle->data.to_worker)
-	{
-		free(handle);
-		return NULL;
-	}
-
-	char *tmp = make_path->path(make_path->handle, "dump.osc");
-	strcpy(handle->osc_path, tmp);
-	free(tmp);
-
-	return handle;
-}
-
-static void
-connect_port(LV2_Handle instance, uint32_t port, void *data)
-{
-	plughandle_t *handle = (plughandle_t *)instance;
-
-	switch(port)
-	{
-		case 0:
-			handle->osc_in = (const LV2_Atom_Sequence *)data;
-			break;
-		case 1:
-			handle->osc_out = (LV2_Atom_Sequence *)data;
-			break;
-		case 2:
-			handle->state = (const float *)data;
-			break;
-		default:
-			break;
-	}
-}
-
-static void
-activate(LV2_Handle instance)
-{
-	plughandle_t *handle = instance;
-
-	handle->offset.play = 0;
-	handle->offset.record = 0;
-	handle->restored = 1;
-}
-
 // rt
 static void
 _bundle_push_cb(uint64_t timestamp, void *data)
 {
 	plughandle_t *handle = data;
 
-	handle->data.ptr = osc_start_bundle(handle->data.ptr, handle->data.end,
-		timestamp, &handle->data.bndl[handle->data.bndl_cnt++]);
+	handle->ptr = osc_start_bundle(handle->ptr, handle->end,
+		timestamp, &handle->bndl[handle->bndl_cnt++]);
 }
 
 // rt
@@ -701,8 +247,8 @@ _bundle_pop_cb(void *data)
 {
 	plughandle_t *handle = data;
 
-	handle->data.ptr = osc_end_bundle(handle->data.ptr, handle->data.end,
-		handle->data.bndl[--handle->data.bndl_cnt]);
+	handle->ptr = osc_end_bundle(handle->ptr, handle->end,
+		handle->bndl[--handle->bndl_cnt]);
 }
 
 // rt
@@ -712,11 +258,11 @@ _message_cb(const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	osc_data_t *ptr = handle->data.ptr;
-	const osc_data_t *end = handle->data.end;
+	osc_data_t *ptr = handle->ptr;
+	const osc_data_t *end = handle->end;
 
 	osc_data_t *itm;
-	if(handle->data.bndl_cnt)
+	if(handle->bndl_cnt)
 		ptr = osc_start_bundle_item(ptr, end, &itm);
 
 	ptr = osc_set_path(ptr, end, path);
@@ -795,154 +341,369 @@ _message_cb(const char *path, const char *fmt,
 		}
 	}
 
-	if(handle->data.bndl_cnt)
+	if(handle->bndl_cnt)
 		ptr = osc_end_bundle_item(ptr, end, itm);
 
-	handle->data.ptr = ptr;
+	handle->ptr = ptr;
 }
 
-// rt
-static void
-_path_change(plughandle_t *handle, const char *path)
+static inline LV2_Worker_Status
+_trigger_job(plughandle_t *handle, const job_t *job)
 {
-	osc_data_t buf [512];
-	osc_data_t *ptr = buf;
-	osc_data_t *end = buf + 512;
+	return handle->sched->schedule_work(handle->sched->handle, sizeof(job_t), job);
+}
 
-	ptr = osc_set_path(ptr, end, "/eteroj/path");
-	ptr = osc_set_fmt(ptr, end, "s");
-	ptr = osc_set_string(ptr, end, path);
+static inline LV2_Worker_Status
+_trigger_record(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_RECORD
+	};
 
-	if(ptr)
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_play(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_PLAY
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_seek(plughandle_t *handle, double beats)
+{
+	const job_t job = {
+		.type = JOB_SEEK,
+		.beats = beats
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_open_play(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_OPEN_PLAY
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_open_record(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_OPEN_RECORD
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_drain(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_DRAIN
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline void
+_play(plughandle_t *handle, int64_t to, uint32_t capacity)
+{
+	const LV2_Atom_Event *src;
+	size_t len;
+	while((src = varchunk_read_request(handle->from_disk, &len)))
 	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
-			handle->sched->handle, ptr - buf, buf);
-		//TODO check status
+		if(handle->draining > 0)
+		{
+			if(src->body.type == handle->uris.eteroj_drain)
+			{
+				//fprintf(stderr, "_play: draining %i\n", handle->draining);
+				handle->draining -= 1;
+			}
+
+			varchunk_read_advance(handle->from_disk);
+			continue;
+		}
+
+		//fprintf(stderr, "_play: %lf %lf\n", src->time.beats, handle->beats_upper);
+
+		if(src->time.beats >= handle->beats_upper)
+			break; // event not part of this region
+
+		//FIXME
+		/*
+		LV2_Atom_Event *dst = lv2_atom_sequence_append_event(handle->event_out,
+			capacity, src);
+		if(dst)
+		{
+			dst->time.frames = (src->time.beats - handle->beats_period) * TIMELY_FRAMES_PER_BEAT(&handle->timely);
+
+			if(dst->time.frames < 0)
+			{
+				//fprintf(stderr, "_play: event late %li\n", dst->time.frames);
+				dst->time.frames = 0;
+			}
+		}
+		else
+			break; // overflow
+		*/
+
+		handle->offset = (src->time.beats - handle->beats_period) * TIMELY_FRAMES_PER_BEAT(&handle->timely);
+		if(handle->offset < 0)
+		{
+			//fprintf(stderr, "_play: event late %li\n", dst->time.frames);
+			handle->offset = 0;
+		}
+
+		osc_dispatch_method(LV2_ATOM_BODY_CONST(&src->body), src->body.size,
+			methods, _bundle_in, _bundle_out, handle);
+
+		varchunk_read_advance(handle->from_disk);
 	}
+}
+
+static inline void
+_rec(plughandle_t *handle, const LV2_Atom_Event *src)
+{
+	// add event to ring buffer
+	LV2_Atom_Event *dst;
+	if((dst = varchunk_write_request(handle->to_disk, sizeof(LV2_Atom_Event) + src->body.size)))
+	{
+		osc_data_t *base = LV2_ATOM_BODY(&dst->body);
+		handle->ptr = base;
+		handle->end = base + src->body.size;
+
+		osc_atom_event_unroll(&handle->oforge, (const LV2_Atom_Object *)&src->body,
+			_bundle_push_cb, _bundle_pop_cb, _message_cb, handle);
+	
+		uint32_t size = handle->ptr
+			? handle->ptr - base
+			: 0;
+
+		if(size)
+		{
+			dst->time.beats = handle->beats_upper;
+			dst->body.type = 0; //XXX
+			dst->body.size = size;
+
+			varchunk_write_advance(handle->to_disk, sizeof(LV2_Atom_Event) + size);
+		}
+	}
+}
+
+static inline void
+_reposition_play(plughandle_t *handle, double beats)
+{
+	handle->draining += 1;
+	_trigger_drain(handle);
+	_trigger_seek(handle, beats);
+}
+
+static inline void
+_reposition_rec(plughandle_t *handle, double beats)
+{
+	_trigger_seek(handle, beats);
+}
+
+static inline double
+_beats(timely_t *timely)
+{
+	double beats = TIMELY_BAR(timely)
+		* TIMELY_BEATS_PER_BAR(timely)
+		+ TIMELY_BAR_BEAT(timely)
+		+ timely->offset.beat / TIMELY_FRAMES_PER_BEAT(timely);
+
+	return beats;
+}
+
+static void
+_cb(timely_t *timely, int64_t frames, LV2_URID type, void *data)
+{
+	plughandle_t *handle = data;
+
+	if(type == TIMELY_URI_SPEED(timely))
+	{
+		handle->rolling = TIMELY_SPEED(timely) > 0.f ? true : false;
+	}
+	else if(type == TIMELY_URI_BAR_BEAT(timely))
+	{
+		double beats = _beats(&handle->timely);
+		fprintf(stderr, "bar_beat: %lf\n", beats);
+
+		if(handle->record_i)
+			_reposition_rec(handle, beats);
+		else
+			_reposition_play(handle, beats);
+	}
+}
+
+static LV2_Handle
+instantiate(const LV2_Descriptor* descriptor, double rate,
+	const char *bundle_path, const LV2_Feature *const *features)
+{
+	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
+	if(!handle)
+		return NULL;
+
+	const LV2_State_Make_Path *make_path = NULL;
+
+	for(unsigned i=0; features[i]; i++)
+	{
+		if(!strcmp(features[i]->URI, LV2_URID__map))
+			handle->map = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
+			handle->sched = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_STATE__makePath))
+			make_path = features[i]->data;
+	}
+
+	if(!handle->map)
+	{
+		fprintf(stderr,
+			"%s: Host does not support urid:map\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+	if(!handle->sched)
+	{
+		fprintf(stderr,
+			"%s: Host does not support worker:sched\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+	if(!make_path)
+	{
+		fprintf(stderr,
+			"%s: Host does not support state:makePath\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+
+	timely_mask_t mask = TIMELY_MASK_BAR_BEAT
+		//| TIMELY_MASK_BAR
+		| TIMELY_MASK_BEAT_UNIT
+		| TIMELY_MASK_BEATS_PER_BAR
+		| TIMELY_MASK_BEATS_PER_MINUTE
+		| TIMELY_MASK_FRAMES_PER_SECOND
+		| TIMELY_MASK_SPEED;
+	timely_init(&handle->timely, handle->map, rate, mask, _cb, handle);
+	lv2_atom_forge_init(&handle->forge, handle->map);
+	osc_forge_init(&handle->oforge, handle->map);
+
+	char *tmp = make_path->path(make_path->handle, DEFAULT_FILE_NAME);
+	strcpy(handle->path, tmp);
+	free(tmp);
+	
+	handle->uris.eteroj_path = handle->map->map(handle->map->handle, ETEROJ_PATH_URI);
+	handle->uris.eteroj_drain = handle->map->map(handle->map->handle, ETEROJ_DRAIN_URI);
+
+	handle->to_disk = varchunk_new(BUF_SIZE);
+	handle->from_disk = varchunk_new(BUF_SIZE);
+
+	return handle;
+}
+
+static void
+connect_port(LV2_Handle instance, uint32_t port, void *data)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	switch(port)
+	{
+		case 0:
+			handle->event_in = (const LV2_Atom_Sequence *)data;
+			break;
+		case 1:
+			handle->event_out = (LV2_Atom_Sequence *)data;
+			break;
+		case 2:
+			handle->record = (const float *)data;
+			break;
+		default:
+			break;
+	}
+}
+
+static void
+activate(LV2_Handle instance)
+{
+	plughandle_t *handle = instance;
+
+	handle->rolling = false;
+	handle->restored = true;
+	handle->seek_beats = 0.0;
+
+	handle->beats_period = 0.0;
+	handle->beats_upper = 0.0;
 }
 
 static void
 run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = instance;
+	uint32_t capacity = handle->event_out->atom.size;
 
-	plugstate_t state = floor(*handle->state);
+	bool record_i = floor(*handle->record);
+	bool record_has_changed = record_i != handle->record_i;
+	handle->record_i = record_i;
 
-	LV2_Atom_Forge *forge = &handle->forge;
+	// trigger pre triggers
+	if(handle->restored || record_has_changed)
+	{
+		if(record_i)
+			_trigger_open_record(handle);
+		else
+			_trigger_open_play(handle);
+
+		handle->restored = false;
+	}
+
 	LV2_Atom_Forge_Frame frame;
-	uint32_t capacity;
+	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
+	lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
 
-	// prepare sequence forges
-	capacity = handle->osc_out->atom.size;
-	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->osc_out, capacity);
-	lv2_atom_forge_sequence_head(forge, &frame, 0);
+	handle->beats_period = handle->beats_upper;
 
-	// write outgoing data
-	if(state == STATE_RECORD)
+	int64_t last_t = 0;
+	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
-		LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
-		{
-			const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+		const int time_event = timely_advance(&handle->timely, obj, last_t, ev->time.frames);
+		handle->beats_upper = _beats(&handle->timely);
 
-			if(obj->atom.type == forge->Object)
-			{
-				event_t *oev;
-				size_t reserve = sizeof(event_t) + obj->atom.size;
-				if((oev= varchunk_write_request(handle->data.to_worker, reserve)))
-				{
-					handle->data.buf = oev->buf;
-					handle->data.ptr = handle->data.buf;
-					handle->data.end = handle->data.buf + reserve - sizeof(event_t);
+		if(record_i && !time_event && handle->rolling)
+			_rec(handle, ev); // dont' record time position signals
+	
+		if(!record_i && handle->rolling)
+			_play(handle, ev->time.frames, capacity);
 
-					osc_atom_event_unroll(&handle->oforge, obj, _bundle_push_cb,
-						_bundle_pop_cb, _message_cb, handle);
-
-					size_t size = handle->data.ptr
-						? handle->data.ptr - handle->data.buf
-						: 0;
-
-					if(size)
-					{
-						handle->offset.record += ev->time.frames;
-						if(handle->offset.record < 0)
-							handle->offset.record = 0;
-
-						oev->delta = handle->offset.record;
-						oev->size = size;
-
-						// offset is always relative to sample #0 of last events period
-						handle->offset.record = -ev->time.frames;
-
-						varchunk_write_advance(handle->data.to_worker, sizeof(event_t) + size);
-					}
-				}
-			}
-		}
-
-		if(state != handle->state_i)
-		{
-			LV2_Worker_Status status = handle->sched->schedule_work(
-				handle->sched->handle, sizeof(clear_msg), clear_msg);
-			//TODO check status
-		}
-
-		if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
-		{
-
-			LV2_Worker_Status status = handle->sched->schedule_work(
-				handle->sched->handle, sizeof(record_msg), record_msg);
-			//TODO check status
-		}
+		last_t = ev->time.frames;
 	}
-	else if(state == STATE_PLAY)
+
+	timely_advance(&handle->timely, NULL, last_t, nsamples);
+	handle->beats_upper = _beats(&handle->timely);
+
+	if(!record_i && handle->rolling)
+		_play(handle, nsamples, capacity);
+
+	// trigger post triggers
+	if(handle->rolling)
 	{
-		// read incoming data
-		const event_t *ev;
-		size_t size;
-		while((ev = varchunk_read_request(handle->data.from_worker, &size)))
-		{
-			if(handle->offset.play + ev->delta >= nsamples)
-				break; // event not part of this period
-
-			handle->offset.play += ev->delta;
-			if(handle->offset.play < 0)
-				handle->offset.play = 0;
-
-			osc_dispatch_method(ev->buf, ev->size, methods, _bundle_in, _bundle_out, handle);
-
-			varchunk_read_advance(handle->data.from_worker);
-		}
-
-		if(state != handle->state_i)
-		{
-			LV2_Worker_Status status = handle->sched->schedule_work(
-				handle->sched->handle, sizeof(rewind_msg), rewind_msg);
-			//TODO check status
-		}
-
-		LV2_Worker_Status status = handle->sched->schedule_work(
-			handle->sched->handle, sizeof(play_msg), play_msg);
-		//TODO check status
+		if(record_i)
+			_trigger_record(handle);
+		else
+			_trigger_play(handle);
 	}
-	else if(state == STATE_PAUSE)
-	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
-			handle->sched->handle, sizeof(pause_msg), pause_msg);
-		//TODO check status
-	}
-	handle->state_i = state;
 
-	lv2_atom_forge_pop(forge, &frame);
-
-	handle->offset.play -= nsamples;
-	handle->offset.record += nsamples;
-
-	if(handle->restored && handle->osc_path[0])
-	{
-		_path_change(handle, handle->osc_path);
-
-		handle->restored = 0;
-	}
+	lv2_atom_forge_pop(&handle->forge, &frame);
 }
 
 static void
@@ -950,10 +711,10 @@ deactivate(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	if(handle->osc_file)
+	if(handle->io)
 	{
-		fflush(handle->osc_file);
-		fclose(handle->osc_file);
+		fclose(handle->io);
+		handle->io = NULL;
 	}
 }
 
@@ -962,10 +723,302 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	varchunk_free(handle->data.from_worker);
-	varchunk_free(handle->data.to_worker);
+	if(handle->to_disk)
+		varchunk_free(handle->to_disk);
+	if(handle->from_disk)
+		varchunk_free(handle->from_disk);
+
+	if(handle->io)
+		fclose(handle->io);
+
 	free(handle);
 }
+
+static LV2_State_Status
+_state_save(LV2_Handle instance, LV2_State_Store_Function store,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	const LV2_State_Map_Path *map_path = NULL;
+
+	for(int i=0; features[i]; i++)
+		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
+			map_path = features[i]->data;
+
+	if(!map_path)
+	{
+		fprintf(stderr, "_state_save: LV2_STATE__mapPath not supported.");
+		return LV2_STATE_ERR_UNKNOWN;
+	}
+
+	const char *abstract = map_path->abstract_path(map_path->handle, handle->path);
+
+	return store(
+		state,
+		handle->uris.eteroj_path,
+		abstract,
+		strlen(abstract) + 1,
+		handle->forge.Path,
+		LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE);
+}
+
+static LV2_State_Status
+_state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	const LV2_State_Map_Path *map_path = NULL;
+
+	for(int i=0; features[i]; i++)
+		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
+			map_path = features[i]->data;
+
+	if(!map_path)
+	{
+		fprintf(stderr, "_state_restore: LV2_STATE__mapPath not supported.");
+		return LV2_STATE_ERR_UNKNOWN;
+	}
+
+	size_t size;
+	uint32_t type;
+	uint32_t flags2;
+	const char *path = retrieve(
+		state,
+		handle->uris.eteroj_path,
+		&size,
+		&type,
+		&flags2
+	);
+
+	// check type
+	if(path && (type != handle->forge.Path) )
+		return LV2_STATE_ERR_BAD_TYPE;
+
+	if(!path)
+		path = DEFAULT_FILE_NAME;
+
+	const char *absolute = map_path->absolute_path(map_path->handle, path);
+
+	strcpy(handle->path, absolute);
+	handle->restored = true;
+
+	return LV2_STATE_SUCCESS;
+}
+
+static const LV2_State_Interface state_iface = {
+	.save = _state_save,
+	.restore = _state_restore
+};
+
+// non-rt thread
+static LV2_Worker_Status
+_work(LV2_Handle instance,
+	LV2_Worker_Respond_Function respond,
+	LV2_Worker_Respond_Handle target,
+	uint32_t size,
+	const void *body)
+{
+	plughandle_t *handle = instance;
+
+	const job_t *job = body;
+	switch(job->type)
+	{
+		case JOB_PLAY:
+		{
+			while(!feof(handle->io))
+			{
+				// read event header from disk
+				LV2_Atom_Event ev1;
+				if(fread(&ev1, sizeof(LV2_Atom_Event), 1, handle->io) == 1)
+				{
+					_event_ntoh(&ev1); // swap bytes
+
+					size_t len = sizeof(LV2_Atom_Event) + ev1.body.size;
+					LV2_Atom_Event *ev2;
+					if((ev2 = varchunk_write_request(handle->from_disk, len)))
+					{
+						// clone event data
+						ev2->time.beats = ev1.time.beats;
+						ev2->body.type = ev1.body.type;
+						ev2->body.size = ev1.body.size;
+
+						// read event body from disk
+						if(ev1.body.size == 0)
+						{
+							//fprintf(stderr, "play: beats %lf %u\n", ev1.time.beats, ev1.body.size);
+							handle->seek_beats = ev1.time.beats;
+							varchunk_write_advance(handle->from_disk, len);
+						}
+						else if(fread(LV2_ATOM_BODY(&ev2->body), ev1.body.size, 1, handle->io) == 1)
+						{
+							//fprintf(stderr, "play: beats %lf %u\n", ev1.time.beats, ev1.body.size);
+							handle->seek_beats = ev1.time.beats;
+							varchunk_write_advance(handle->from_disk, len);
+						}
+						else
+						{
+							if(!feof(handle->io))
+								fprintf(stderr, "play: reading event body failed.\n");
+						}
+					}
+					else
+					{
+						fseek(handle->io, -sizeof(LV2_Atom_Event), SEEK_CUR); // rewind
+
+						break; // ringbuffer full
+					}
+				}
+				else
+				{
+					if(!feof(handle->io))
+						fprintf(stderr, "play: reading event header failed.\n");
+				}
+			}
+
+			break;
+		}
+		case JOB_RECORD:
+		{
+			const LV2_Atom_Event *ev;
+			size_t len;
+			while((ev = varchunk_read_request(handle->to_disk, &len)))
+			{
+				double beats = ev->time.beats;
+
+				_event_hton((LV2_Atom_Event *)ev); // swap bytes
+				if(fwrite(ev, len, 1, handle->io) == 1)
+				{
+					//fprintf(stderr, "record: beats %lf %u\n", ev->time.beats, ev->body.size);
+					handle->seek_beats = beats;
+					varchunk_read_advance(handle->to_disk);
+				}
+				else
+				{
+					fprintf(stderr, "record: writing event failed.\n");
+					break;
+				}
+			}
+
+			break;
+		}
+		case JOB_SEEK:
+		{
+			fprintf(stderr, "seek: request to %lf\n", job->beats);
+
+			// rewind to start of file
+			if(job->beats < handle->seek_beats)
+			{
+				fprintf(stderr, "seek rewind\n");
+				fseek(handle->io, 0, SEEK_SET);
+			}
+
+			while(!feof(handle->io))
+			{
+				// read event header from disk
+				LV2_Atom_Event ev1;
+				if(fread(&ev1, sizeof(LV2_Atom_Event), 1, handle->io) == 1)
+				{
+					_event_hton(&ev1); // swap bytes
+
+					// check whether event precedes current seek
+					if(ev1.time.beats < job->beats)
+					{
+						// skip event
+						if(ev1.body.size > 0)
+							fseek(handle->io, ev1.body.size, SEEK_CUR); //FIXME check return
+
+						continue;
+					}
+
+					// unread event header
+					fseek(handle->io, -sizeof(LV2_Atom_Event), SEEK_CUR); //FIXME check return
+					fprintf(stderr, "seek: seeked to %lf\n", ev1.time.beats);
+
+					break;
+				}
+				else
+				{
+					if(!feof(handle->io))
+						fprintf(stderr, "seek: reading event header failed.\n");
+				}
+			}
+
+			break;
+		}
+		case JOB_DRAIN:
+		{
+			// inject drain marker event
+			LV2_Atom_Event *ev;
+			const size_t len = sizeof(LV2_Atom_Event);
+			if((ev = varchunk_write_request(handle->from_disk, len)))
+			{
+				ev->time.beats = 0.0; //XXX
+				ev->body.type = handle->uris.eteroj_drain;
+				ev->body.size = 0;
+
+				varchunk_write_advance(handle->from_disk, len);
+			}
+			else
+				fprintf(stderr, "drain: ringbuffer overflow\n");
+
+			break;
+		}
+		case JOB_OPEN_PLAY:
+		{
+			fprintf(stderr, "open for playback: %s\n", handle->path);
+			if(handle->io)
+				fclose(handle->io);
+			if(!(handle->io = fopen(handle->path, "r+")))
+				fprintf(stderr, "failed to open file.\n");
+
+			break;
+		}
+		case JOB_OPEN_RECORD:
+		{
+			fprintf(stderr, "open for recording: %s\n", handle->path);
+			if(handle->io)
+				fclose(handle->io);
+			if(!(handle->io = fopen(handle->path, "w+")))
+				fprintf(stderr, "failed to open file.\n");
+
+			break;
+		}
+	}
+
+	return LV2_WORKER_SUCCESS;
+}
+
+// rt-thread
+static LV2_Worker_Status
+_work_response(LV2_Handle instance, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	//TODO
+
+	return LV2_WORKER_SUCCESS;
+}
+
+// rt-thread
+static LV2_Worker_Status
+_end_run(LV2_Handle instance)
+{
+	plughandle_t *handle = instance;
+
+	//TODO
+
+	return LV2_WORKER_SUCCESS;
+}
+
+static const LV2_Worker_Interface work_iface = {
+	.work = _work,
+	.work_response = _work_response,
+	.end_run = _end_run
+};
 
 static const void*
 extension_data(const char* uri)
