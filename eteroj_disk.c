@@ -438,25 +438,7 @@ _play(plughandle_t *handle, int64_t to, uint32_t capacity)
 		if(src->time.beats >= handle->beats_upper)
 			break; // event not part of this region
 
-		//FIXME
-		/*
-		LV2_Atom_Event *dst = lv2_atom_sequence_append_event(handle->event_out,
-			capacity, src);
-		if(dst)
-		{
-			dst->time.frames = (src->time.beats - handle->beats_period) * TIMELY_FRAMES_PER_BEAT(&handle->timely);
-
-			if(dst->time.frames < 0)
-			{
-				//fprintf(stderr, "_play: event late %li\n", dst->time.frames);
-				dst->time.frames = 0;
-			}
-		}
-		else
-			break; // overflow
-		*/
-
-		handle->offset = (src->time.beats - handle->beats_period) * TIMELY_FRAMES_PER_BEAT(&handle->timely);
+		handle->offset = round((src->time.beats - handle->beats_period) * TIMELY_FRAMES_PER_BEAT(&handle->timely));
 		if(handle->offset < 0)
 		{
 			//fprintf(stderr, "_play: event late %li\n", dst->time.frames);
