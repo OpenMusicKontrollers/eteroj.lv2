@@ -536,7 +536,6 @@ _cb(timely_t *timely, int64_t frames, LV2_URID type, void *data)
 	else if(type == TIMELY_URI_BAR_BEAT(timely))
 	{
 		double beats = _beats(&handle->timely);
-		fprintf(stderr, "bar_beat: %lf\n", beats);
 
 		if(handle->record_i)
 			_reposition_rec(handle, beats);
