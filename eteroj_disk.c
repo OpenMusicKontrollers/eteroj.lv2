@@ -895,6 +895,7 @@ _work(LV2_Handle instance,
 			{
 				fprintf(stderr, "seek rewind\n");
 				fseek(handle->io, 0, SEEK_SET);
+				handle->seek_beats = 0.0;
 			}
 
 			while(!feof(handle->io))
@@ -908,6 +909,8 @@ _work(LV2_Handle instance,
 					// check whether event precedes current seek
 					if(ev1.time.beats < job->beats)
 					{
+						handle->seek_beats = ev1.time.beats;
+
 						// skip event
 						if(ev1.body.size > 0)
 							fseek(handle->io, ev1.body.size, SEEK_CUR); //FIXME check return
@@ -917,7 +920,7 @@ _work(LV2_Handle instance,
 
 					// unread event header
 					fseek(handle->io, -sizeof(LV2_Atom_Event), SEEK_CUR); //FIXME check return
-					fprintf(stderr, "seek: seeked to %lf\n", ev1.time.beats);
+					fprintf(stderr, "seek: seeked to %lf\n", handle->seek_beats);
 
 					break;
 				}
