@@ -85,11 +85,9 @@ eteroj:io
 	  a lv2:InputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports midi:MidiEvent ;
-		atom:supports time:Position ;
 		atom:supports atom:Object ;
-		atom:supports patch:Message ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 0 ;
 		lv2:symbol "osc_in" ;
 		lv2:name "OSC Input" ;
@@ -99,11 +97,9 @@ eteroj:io
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports midi:MidiEvent ;
-		atom:supports time:Position ;
 		atom:supports atom:Object ;
-		atom:supports patch:Message ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;
@@ -143,10 +139,8 @@ eteroj:disk
 	  a lv2:InputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports midi:MidiEvent ;
 		atom:supports time:Position ;
 		atom:supports atom:Object ;
-		atom:supports patch:Message ;
 		atom:supports osc:Event ;
 		lv2:index 0 ;
 		lv2:symbol "osc_in" ;
@@ -157,10 +151,7 @@ eteroj:disk
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports midi:MidiEvent ;
-		atom:supports time:Position ;
 		atom:supports atom:Object ;
-		atom:supports patch:Message ;
 		atom:supports osc:Event ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
@@ -194,8 +185,9 @@ eteroj:query
 	  a lv2:InputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports patch:Message ;
+		atom:supports atom:Object ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 0 ;
 		lv2:symbol "osc_in" ;
 		lv2:name "OSC Input" ;
@@ -206,8 +198,9 @@ eteroj:query
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports patch:Message ;
+		atom:supports atom:Object ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;
@@ -229,6 +222,7 @@ eteroj:cloak
 	  a lv2:InputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
+		atom:supports atom:Object ;
 		atom:supports osc:Event ;
 		lv2:index 0 ;
 		lv2:symbol "osc_in" ;
@@ -272,6 +266,7 @@ eteroj:decloak
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
+		atom:supports atom:Object ;
 		atom:supports osc:Event ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
