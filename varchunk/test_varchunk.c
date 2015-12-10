@@ -17,13 +17,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
+#include <pthread.h>
 
 #include <varchunk.h>
 
-#include <uv.h>
-
-static void
+static void *
 producer_main(void *arg)
 {
 	varchunk_t *varchunk = arg;
@@ -48,9 +46,11 @@ producer_main(void *arg)
 			// buffer full
 		}
 	}
+
+	return NULL;
 }
 
-static void
+static void *
 consumer_main(void *arg)
 {
 	varchunk_t *varchunk = arg;
@@ -63,7 +63,8 @@ consumer_main(void *arg)
 		if( (ptr = varchunk_read_request(varchunk, &toread)) )
 		{
 			uint64_t val = *(uint64_t *)ptr;
-			assert(val == cnt);
+			if(val != cnt)
+				exit(-1); // TEST FAILED
 			varchunk_read_advance(varchunk);
 			//fprintf(stdout, "C %u %lu %zu\n", cnt, val, toread);
 			cnt++;
@@ -73,26 +74,27 @@ consumer_main(void *arg)
 			// buffer empty
 		}
 	}
+
+	return NULL;
 }
 
 int
 main(int argc, char **argv)
 {
-	uv_loop_t *loop = uv_default_loop();	
-
-	uv_thread_t producer;
-	uv_thread_t consumer;
+	pthread_t producer;
+	pthread_t consumer;
 	varchunk_t *varchunk = varchunk_new(8192);
 
-	uv_thread_create(&consumer, consumer_main, varchunk);
-	uv_thread_create(&producer, producer_main, varchunk);
+	if(!varchunk_is_lock_free())
+		return -1; // TEST FAILED
 
-	uv_thread_join(&producer);
-	uv_thread_join(&consumer);
+	pthread_create(&consumer, NULL, consumer_main, varchunk);
+	pthread_create(&producer, NULL, producer_main, varchunk);
+
+	pthread_join(producer, NULL);
+	pthread_join(consumer, NULL);
 
 	varchunk_free(varchunk);
-
-	printf("passed\n");
 
 	return 0;
 }

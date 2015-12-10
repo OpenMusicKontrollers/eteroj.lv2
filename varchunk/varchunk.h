@@ -24,6 +24,7 @@ extern "C" {
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <assert.h>
 
 #if !defined(_WIN32)
@@ -35,6 +36,9 @@ extern "C" {
  *****************************************************************************/
 
 typedef struct _varchunk_t varchunk_t;
+
+static inline int
+varchunk_is_lock_free(void);
 
 static inline varchunk_t *
 varchunk_new(size_t minimum);
@@ -72,11 +76,20 @@ struct _varchunk_t {
   size_t mask;
 	size_t rsvd;
 
-  volatile size_t head;
-  volatile size_t tail;
+  _Atomic size_t head;
+  _Atomic size_t tail;
 
   void *buf;
 }; 
+
+static inline int
+varchunk_is_lock_free(void)
+{
+	varchunk_t varchunk;
+
+	return atomic_is_lock_free(&varchunk.head)
+	 && atomic_is_lock_free(&varchunk.tail);
+}
 
 static inline varchunk_t *
 varchunk_new(size_t minimum)
@@ -85,24 +98,26 @@ varchunk_new(size_t minimum)
 	
 	if(!(varchunk = calloc(1, sizeof(varchunk_t))))
 		return NULL;
+
+	atomic_init(&varchunk->head, 0);
+	atomic_init(&varchunk->tail, 0);
 	
 	varchunk->size = 1;
 	while(varchunk->size < minimum)
-		varchunk->size <<= 1;
+		varchunk->size <<= 1; // assure size to be a power of 2
 	varchunk->mask = varchunk->size - 1;
 
 #if defined(_WIN32)
 	varchunk->buf = _aligned_malloc(varchunk->size, sizeof(varchunk_elmnt_t));
 #else
 	posix_memalign(&varchunk->buf, sizeof(varchunk_elmnt_t), varchunk->size);
-	mlock(varchunk->buf, varchunk->size);
+	mlock(varchunk->buf, varchunk->size); // prevent memory from being flushed to disk
 #endif
 	if(!varchunk->buf)
 	{
 		free(varchunk);
 		return NULL;
 	}
-	//TODO mlock
 	
 	return varchunk;
 }
@@ -124,11 +139,11 @@ varchunk_free(varchunk_t *varchunk)
 }
 
 static inline void
-_varchunk_write_advance_raw(varchunk_t *varchunk, size_t written)
+_varchunk_write_advance_raw(varchunk_t *varchunk, size_t head, size_t written)
 {
 	// only producer is allowed to advance write head
-	size_t new_head = (varchunk->head + written) & varchunk->mask;
-	varchunk->head = new_head;
+	size_t new_head = (head + written) & varchunk->mask;
+	atomic_store_explicit(&varchunk->head, new_head, memory_order_release);
 }
 
 static inline void *
@@ -142,8 +157,8 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 
 	size_t space; // size of writable buffer
 	size_t end; // virtual end of writable buffer
-	size_t head = varchunk->head; // read head
-	size_t tail = varchunk->tail; // read tail ONCE (consumer modifies it any time)
+	size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed); // read head
+	size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_acquire); // read tail (consumer modifies it any time)
 	size_t padded = 2*sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(minimum);
 
 	// calculate writable space
@@ -178,7 +193,7 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 				varchunk_elmnt_t *elmnt = buf1;
 				elmnt->size = len1 - sizeof(varchunk_elmnt_t);
 				elmnt->gap = 1;
-				_varchunk_write_advance_raw(varchunk, len1);
+				_varchunk_write_advance_raw(varchunk, head, len1);
 
 				varchunk->rsvd = minimum;
 				return buf2 + sizeof(varchunk_elmnt_t);
@@ -199,7 +214,7 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 			varchunk->rsvd = 0;
 			return NULL;
 		}
-		else // enough space on contiguous buffer, use it!
+		else // enough space left on contiguous buffer, use it!
 		{
 			varchunk->rsvd = minimum;
 			return buf + sizeof(varchunk_elmnt_t);
@@ -214,29 +229,30 @@ varchunk_write_advance(varchunk_t *varchunk, size_t written)
 	assert(written <= varchunk->rsvd);
 
 	// write elmnt header at head
-	varchunk_elmnt_t *elmnt = varchunk->buf + varchunk->head;
+	size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed);
+	varchunk_elmnt_t *elmnt = varchunk->buf + head;
 	elmnt->size = written;
 	elmnt->gap = 0;
 
 	// advance write head
-	_varchunk_write_advance_raw(varchunk,
+	_varchunk_write_advance_raw(varchunk, head,
 		sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(written));
 }
 
 static inline void
-_varchunk_read_advance_raw(varchunk_t *varchunk, size_t read)
+_varchunk_read_advance_raw(varchunk_t *varchunk, size_t tail, size_t read)
 {
 	// only consumer is allowed to advance read tail 
-	size_t new_tail = (varchunk->tail + read) & varchunk->mask;
-	varchunk->tail = new_tail;
+	size_t new_tail = (tail + read) & varchunk->mask;
+	atomic_store_explicit(&varchunk->tail, new_tail, memory_order_release);
 }
 
 static inline const void *
 varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 {
 	size_t space; // size of available buffer
-	size_t head = varchunk->head; // read head ONCE (producer modifies it any time)
-	size_t tail = varchunk->tail; // read tail
+	size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed); // read tail
+	size_t head = atomic_load_explicit(&varchunk->head, memory_order_acquire); // read head (producer modifies it any time)
 
 	// calculate readable space
 	if(head > tail)
@@ -258,7 +274,7 @@ varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 			if(elmnt->gap) // gap elmnt?
 			{
 				// skip gap
-				_varchunk_read_advance_raw(varchunk, len1);
+				_varchunk_read_advance_raw(varchunk, tail, len1);
 
 				// second part of available buffer
 				void *buf2 = varchunk->buf;
@@ -282,7 +298,7 @@ varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 			if(elmnt->gap) // a single gap elmnt?
 			{
 				// skip gap
-				_varchunk_read_advance_raw(varchunk, space);
+				_varchunk_read_advance_raw(varchunk, tail, space);
 
 				*toread = 0;
 				return NULL;
@@ -305,10 +321,11 @@ static inline void
 varchunk_read_advance(varchunk_t *varchunk)
 {
 	// get elmnt header from tail (for size)
-	const varchunk_elmnt_t *elmnt = varchunk->buf + varchunk->tail;
+	size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed);
+	const varchunk_elmnt_t *elmnt = varchunk->buf + tail;
 
 	// advance read tail
-	_varchunk_read_advance_raw(varchunk,
+	_varchunk_read_advance_raw(varchunk, tail,
 		sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(elmnt->size));
 }
 
