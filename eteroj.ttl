@@ -70,7 +70,7 @@ eteroj:status
 eteroj:io
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
-	doap:name "Eteroj OSC Comm" ;
+	doap:name "Eteroj Comm" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
@@ -127,7 +127,7 @@ eteroj:io
 eteroj:disk
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
-	doap:name "Eteroj OSC Recorder/Player" ;
+	doap:name "Eteroj Recorder/Player" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
@@ -174,7 +174,7 @@ eteroj:disk
 eteroj:query
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
-	doap:name "Eteroj OSC Query" ;
+	doap:name "Eteroj Query" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap ;
@@ -246,6 +246,72 @@ eteroj:decloak
 	a lv2:Plugin,
 		lv2:ConverterPlugin;
 	doap:name "Eteroj Decloak " ;
+	doap:license lic:Artistic-2.0 ;
+	lv2:project proj:eteroj ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+
+	# input event port
+	lv2:port [
+	  a lv2:InputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports midi:MidiEvent ;
+		lv2:index 0 ;
+		lv2:symbol "midi_in" ;
+		lv2:name "MIDI Input" ;
+		lv2:designation lv2:control ;
+	] ;
+	# output event port
+	lv2:port [
+	  a lv2:OutputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports atom:Object ;
+		atom:supports osc:Event ;
+		lv2:index 1 ;
+		lv2:symbol "osc_out" ;
+		lv2:name "OSC Output" ;
+		lv2:designation lv2:control ;
+	] .
+
+# Unpack Plugin
+eteroj:unpack
+	a lv2:Plugin,
+		lv2:ConverterPlugin;
+	doap:name "Eteroj Unpack" ;
+	doap:license lic:Artistic-2.0 ;
+	lv2:project proj:eteroj ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+
+	# input event port
+	lv2:port [
+	  a lv2:InputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports atom:Object ;
+		atom:supports osc:Event ;
+		lv2:index 0 ;
+		lv2:symbol "osc_in" ;
+		lv2:name "OSC Input" ;
+		lv2:designation lv2:control ;
+	] ;
+	# output event port
+	lv2:port [
+	  a lv2:OutputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports midi:MidiEvent ;
+		lv2:index 1 ;
+		lv2:symbol "midi_out" ;
+		lv2:name "MIDI Output" ;
+		lv2:designation lv2:control ;
+	] .
+
+# Pack Plugin
+eteroj:pack
+	a lv2:Plugin,
+		lv2:ConverterPlugin;
+	doap:name "Eteroj Pack " ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;

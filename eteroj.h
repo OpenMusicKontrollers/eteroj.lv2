@@ -47,11 +47,15 @@
 #define ETEROJ_QUERY_URI							ETEROJ_URI"#query"
 #define ETEROJ_CLOAK_URI							ETEROJ_URI"#cloak"
 #define ETEROJ_DECLOAK_URI						ETEROJ_URI"#decloak"
+#define ETEROJ_PACK_URI								ETEROJ_URI"#pack"
+#define ETEROJ_UNPACK_URI							ETEROJ_URI"#unpack"
 
 extern const LV2_Descriptor eteroj_io;
 extern const LV2_Descriptor eteroj_disk;
 extern const LV2_Descriptor eteroj_query;
 extern const LV2_Descriptor eteroj_cloak;
 extern const LV2_Descriptor eteroj_decloak;
+extern const LV2_Descriptor eteroj_pack;
+extern const LV2_Descriptor eteroj_unpack;
 
 #endif // _ETEROJ_LV2_H
