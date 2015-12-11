@@ -670,6 +670,11 @@ _udp_free(osc_stream_t *stream)
 			_instant_err(stream, "_udp_free", err);
 		uv_close((uv_handle_t *)&udp->socket, _udp_close_cb);
 	}
+	else
+	{
+		stream->driver->free(stream->data);
+		free(stream);
+	}
 }
 
 /*****************************************************************************
