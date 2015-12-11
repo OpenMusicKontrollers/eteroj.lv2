@@ -22,12 +22,15 @@
 #include <osc.h>
 #include <lv2_osc.h>
 
+#define DEFAULT_PACK_PATH "/midi"
+
 typedef struct _plughandle_t plughandle_t;
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	struct {
 		LV2_URID midi_MidiEvent;
+		LV2_URID eteroj_pack_path;
 	} uris;
 
 	const LV2_Atom_Sequence *midi_in;
@@ -35,6 +38,8 @@ struct _plughandle_t {
 
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
+
+	char pack_path [1024];
 };
 
 static LV2_Handle
@@ -56,8 +61,11 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 	}
 
 	handle->uris.midi_MidiEvent = handle->map->map(handle->map->handle, LV2_MIDI__MidiEvent);
+	handle->uris.eteroj_pack_path = handle->map->map(handle->map->handle, ETEROJ_PACK_PATH_URI);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	osc_forge_init(&handle->oforge, handle->map);
+	
+	strcpy(handle->pack_path, DEFAULT_PACK_PATH);
 
 	return handle;
 }
@@ -103,7 +111,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 			if(ref)
 				ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
 			if(ref)
-				ref = osc_forge_message_push(&handle->oforge, forge, frames, "/midi", "m"); //TODO use property for this
+				ref = osc_forge_message_push(&handle->oforge, forge, frames, handle->pack_path, "m");
 			if(ref)
 				ref = osc_forge_midi(&handle->oforge, forge, atom->size, LV2_ATOM_BODY_CONST(atom));
 			if(ref)
@@ -125,6 +133,66 @@ cleanup(LV2_Handle instance)
 	free(handle);
 }
 
+static LV2_State_Status
+_state_save(LV2_Handle instance, LV2_State_Store_Function store,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	return store(
+		state,
+		handle->uris.eteroj_pack_path,
+		handle->pack_path,
+		strlen(handle->pack_path) + 1,
+		handle->forge.String,
+		LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE);
+}
+
+static LV2_State_Status
+_state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	size_t size;
+	uint32_t type;
+	uint32_t flags2;
+	const char *pack_path = retrieve(
+		state,
+		handle->uris.eteroj_pack_path,
+		&size,
+		&type,
+		&flags2
+	);
+
+	// check type
+	if(pack_path && (type != handle->forge.String) )
+		return LV2_STATE_ERR_BAD_TYPE;
+
+	if(!pack_path)
+		pack_path = DEFAULT_PACK_PATH;
+
+	strcpy(handle->pack_path, pack_path);
+
+	return LV2_STATE_SUCCESS;
+}
+
+static const LV2_State_Interface state_iface = {
+	.save = _state_save,
+	.restore = _state_restore
+};
+
+static const void*
+extension_data(const char* uri)
+{
+	if(!strcmp(uri, LV2_STATE__interface))
+		return &state_iface;
+
+	return NULL;
+}
+
 const LV2_Descriptor eteroj_pack = {
 	.URI						= ETEROJ_PACK_URI,
 	.instantiate		= instantiate,
@@ -133,5 +201,5 @@ const LV2_Descriptor eteroj_pack = {
 	.run						= run,
 	.deactivate			= NULL,
 	.cleanup				= cleanup,
-	.extension_data	= NULL
+	.extension_data	= extension_data
 };

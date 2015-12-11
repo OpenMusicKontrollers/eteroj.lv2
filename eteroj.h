@@ -40,6 +40,7 @@
 #define ETEROJ_STAT_URI								ETEROJ_URI"#status"
 
 #define ETEROJ_PATH_URI								ETEROJ_URI"#path"
+#define ETEROJ_PACK_PATH_URI					ETEROJ_URI"#pack_path"
 
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"

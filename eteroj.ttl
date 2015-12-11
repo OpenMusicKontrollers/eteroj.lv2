@@ -66,6 +66,11 @@ eteroj:status
 	rdfs:label "Status" ;
 	rdfs:range atom:String .
 
+eteroj:pack_path
+	a lv2:Parameter ;
+	rdfs:label "Path" ;
+	rdfs:range atom:String .
+
 # IO Plugin
 eteroj:io
 	a lv2:Plugin ,
@@ -74,11 +79,8 @@ eteroj:io
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
-	lv2:requiredFeature work:schedule, urid:map ;
+	lv2:requiredFeature work:schedule, urid:map, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log, osc:schedule ;
-
-	patch:writable eteroj:url ;
-	patch:readable eteroj:status ;
 
 	lv2:port [
 		# sink event port
@@ -121,6 +123,15 @@ eteroj:io
 		lv2:scalePoint [ rdfs:label "Timedout" ;			rdf:value 2 ] ;
 		lv2:scalePoint [ rdfs:label "Errored" ;				rdf:value 3 ] ;
 		lv2:scalePoint [ rdfs:label "Connected" ;			rdf:value 4 ] ;
+	] ;
+
+	# parameters
+	patch:writable eteroj:url ;
+	patch:readable eteroj:status ;
+
+	# default state
+	state:state [
+		eteroj:url "osc.udp4://localhost:9090" ;
 	] .
 
 # Disk Plugin
@@ -314,6 +325,8 @@ eteroj:pack
 	doap:name "Eteroj Pack " ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
+	lv2:extensionData state:interface ;
+	lv2:requiredFeature state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
 
 	# input event port
@@ -338,4 +351,12 @@ eteroj:pack
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;
 		lv2:designation lv2:control ;
+	] ;
+
+	# parameters
+	patch:writable eteroj:pack_path ;
+
+	# default state
+	state:state [
+		eteroj:pack_path "/midi" ;
 	] .
