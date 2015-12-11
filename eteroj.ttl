@@ -335,6 +335,7 @@ eteroj:pack
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
 		atom:supports midi:MidiEvent ;
+		atom:supports patch:Message ;
 		lv2:index 0 ;
 		lv2:symbol "midi_in" ;
 		lv2:name "MIDI Input" ;
@@ -347,6 +348,7 @@ eteroj:pack
 		atom:bufferType atom:Sequence ;
 		atom:supports atom:Object ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;

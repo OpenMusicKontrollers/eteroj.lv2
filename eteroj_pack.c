@@ -21,6 +21,7 @@
 #include <eteroj.h>
 #include <osc.h>
 #include <lv2_osc.h>
+#include <props.h>
 
 #define DEFAULT_PACK_PATH "/midi"
 
@@ -30,16 +31,25 @@ struct _plughandle_t {
 	LV2_URID_Map *map;
 	struct {
 		LV2_URID midi_MidiEvent;
-		LV2_URID eteroj_pack_path;
 	} uris;
 
 	const LV2_Atom_Sequence *midi_in;
 	LV2_Atom_Sequence *osc_out;
 
+	props_t *props;
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
 
-	char pack_path [1024];
+	char pack_path [512];
+};
+
+static const props_def_t pack_path_def = {
+	.label = "Path",
+	.property = ETEROJ_PACK_PATH_URI,
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__String,
+	.mode = PROP_MODE_STATIC,
+	.maximum.s = 512 // strlen
 };
 
 static LV2_Handle
@@ -61,11 +71,20 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 	}
 
 	handle->uris.midi_MidiEvent = handle->map->map(handle->map->handle, LV2_MIDI__MidiEvent);
-	handle->uris.eteroj_pack_path = handle->map->map(handle->map->handle, ETEROJ_PACK_PATH_URI);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	osc_forge_init(&handle->oforge, handle->map);
 	
 	strcpy(handle->pack_path, DEFAULT_PACK_PATH);
+
+	handle->props = props_new(1, descriptor->URI, handle->map, handle);
+	if(!handle->props)
+	{
+		free(handle);
+		return NULL;
+	}
+
+	props_register(handle->props, &pack_path_def, NULL, &handle->pack_path);
+	props_sort(handle->props);
 
 	return handle;
 }
@@ -102,9 +121,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 	
 	LV2_ATOM_SEQUENCE_FOREACH(handle->midi_in, ev)
 	{
-		const LV2_Atom *atom = &ev->body;
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		if(ev->body.type == handle->uris.midi_MidiEvent)
+		if(  !props_advance(handle->props, &handle->forge, ev->time.frames, obj, &ref)
+			&& (obj->atom.type == handle->uris.midi_MidiEvent) )
 		{
 			//TODO handle SysEx
 			LV2_Atom_Forge_Frame frames [2];
@@ -113,7 +133,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 			if(ref)
 				ref = osc_forge_message_push(&handle->oforge, forge, frames, handle->pack_path, "m");
 			if(ref)
-				ref = osc_forge_midi(&handle->oforge, forge, atom->size, LV2_ATOM_BODY_CONST(atom));
+				ref = osc_forge_midi(&handle->oforge, forge, obj->atom.size, LV2_ATOM_BODY_CONST(&obj->atom));
 			if(ref)
 				osc_forge_message_pop(&handle->oforge, forge, frames);
 		}
@@ -130,7 +150,10 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	free(handle);
+	if(handle->props)
+		props_free(handle->props);
+	if(handle)
+		free(handle);
 }
 
 static LV2_State_Status
@@ -140,13 +163,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return store(
-		state,
-		handle->uris.eteroj_pack_path,
-		handle->pack_path,
-		strlen(handle->pack_path) + 1,
-		handle->forge.String,
-		LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE);
+	return props_save(handle->props, &handle->forge, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -156,27 +173,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	size_t size;
-	uint32_t type;
-	uint32_t flags2;
-	const char *pack_path = retrieve(
-		state,
-		handle->uris.eteroj_pack_path,
-		&size,
-		&type,
-		&flags2
-	);
-
-	// check type
-	if(pack_path && (type != handle->forge.String) )
-		return LV2_STATE_ERR_BAD_TYPE;
-
-	if(!pack_path)
-		pack_path = DEFAULT_PACK_PATH;
-
-	strcpy(handle->pack_path, pack_path);
-
-	return LV2_STATE_SUCCESS;
+	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
