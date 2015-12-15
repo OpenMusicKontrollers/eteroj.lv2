@@ -686,7 +686,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 				else if(value->type == forge->Float)
 				{
 					osc_forge_message_vararg(&handle->oforge, forge, uri, "if",
-						handle->cnt++, ((const LV2_Atom_Int *)value)->body);
+						handle->cnt++, ((const LV2_Atom_Float *)value)->body);
 				}
 				else if(value->type == forge->Double)
 				{
