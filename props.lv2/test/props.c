@@ -30,6 +30,7 @@ struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_Log_Log *log;
 	LV2_Atom_Forge forge;
+	LV2_Atom_Forge_Ref ref;
 
 	LV2_URID log_trace;
 
@@ -54,6 +55,13 @@ struct _plughandle_t {
 		char val6 [256];
 	} stat;
 
+	struct {
+		LV2_URID stat2;
+		LV2_URID stat4;
+		LV2_URID dyn2;
+		LV2_URID dyn4;
+	} urid;
+
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
 };
@@ -62,6 +70,7 @@ static const props_def_t dyn1 = {
 	.label = "Int",
 	.property = PROPS_PREFIX"Int",
 	.access = LV2_PATCH__writable,
+	.unit = LV2_UNITS__hz,
 	.type = LV2_ATOM__Int,
 	.mode = PROP_MODE_DYNAMIC,
 	.minimum.i = 0,
@@ -71,27 +80,30 @@ static const props_def_t dyn1 = {
 static const props_def_t dyn2 = {
 	.label = "Long",
 	.property = PROPS_PREFIX"Long",
-	.access = LV2_PATCH__writable,
+	.access = LV2_PATCH__readable,
+	.unit = LV2_UNITS__khz,
 	.type = LV2_ATOM__Long,
 	.mode = PROP_MODE_DYNAMIC,
 	.minimum.h = 0,
-	.maximum.h = 10
+	.maximum.h = 20
 };
 
 static const props_def_t dyn3 = {
 	.label = "Float",
 	.property = PROPS_PREFIX"Float",
-	.access = LV2_PATCH__readable,
+	.access = LV2_PATCH__writable,
+	.unit = LV2_UNITS__mhz,
 	.type = LV2_ATOM__Float,
 	.mode = PROP_MODE_DYNAMIC,
-	.minimum.f = -1.f,
-	.maximum.f = 1.f
+	.minimum.f = -0.5f,
+	.maximum.f = 0.5f
 };
 
 static const props_def_t dyn4 = {
 	.label = "Double",
 	.property = PROPS_PREFIX"Double",
 	.access = LV2_PATCH__readable,
+	.unit = LV2_UNITS__db,
 	.type = LV2_ATOM__Double,
 	.mode = PROP_MODE_DYNAMIC,
 	.minimum.d = -1.0,
@@ -244,6 +256,62 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	}
 }
 
+static void
+_intercept_dyn1(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, forge, frames, event, impl);
+
+	handle->dyn.val2 = handle->dyn.val1 * 2;
+
+	if(handle->ref)
+		handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn2);
+}
+
+static void
+_intercept_dyn3(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, forge, frames, event, impl);
+
+	handle->dyn.val4 = handle->dyn.val3 * 2;
+
+	if(handle->ref)
+		handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn4);
+}
+
+static void
+_intercept_stat1(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, forge, frames, event, impl);
+
+	handle->stat.val2 = handle->stat.val1 * 2;
+
+	if(handle->ref)
+		handle->ref = props_set(handle->props, forge, frames, handle->urid.stat2);
+}
+
+static void
+_intercept_stat3(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, forge, frames, event, impl);
+
+	handle->stat.val4 = handle->stat.val3 * 2;
+
+	if(handle->ref)
+		handle->ref = props_set(handle->props, forge, frames, handle->urid.stat4);
+}
+
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
 	const char *bundle_path, const LV2_Feature *const *features)
@@ -287,29 +355,41 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	handle->dyn.val1 = 2;
-	handle->dyn.val2 = 3;
+	handle->dyn.val2 = handle->dyn.val1 * 2;
 	handle->dyn.val3 = 0.2f;
-	handle->dyn.val4 = 0.3;
+	handle->dyn.val4 = handle->dyn.val3 * 2;
 	handle->dyn.val5 = 0;
 	handle->dyn.val6 = true;
 	handle->dyn.val7[0] = '\0';
 
-	props_register(handle->props, &dyn1, _intercept, &handle->dyn.val1);
-	props_register(handle->props, &dyn2, _intercept, &handle->dyn.val2);
-	props_register(handle->props, &dyn3, _intercept, &handle->dyn.val3);
-	props_register(handle->props, &dyn4, _intercept, &handle->dyn.val4);
-	props_register(handle->props, &dyn5, _intercept, &handle->dyn.val5);
-	props_register(handle->props, &dyn6, _intercept, &handle->dyn.val6);
-	props_register(handle->props, &dyn7, _intercept, &handle->dyn.val7);
+	if(  props_register(handle->props, &dyn1, _intercept_dyn1, &handle->dyn.val1)
+		&& (handle->urid.dyn2 = props_register(handle->props, &dyn2, _intercept,
+			&handle->dyn.val2))
+		&& props_register(handle->props, &dyn3, _intercept_dyn3, &handle->dyn.val3)
+		&& (handle->urid.dyn4 = props_register(handle->props, &dyn4, _intercept,
+			&handle->dyn.val4))
+		&& props_register(handle->props, &dyn5, _intercept, &handle->dyn.val5)
+		&& props_register(handle->props, &dyn6, _intercept, &handle->dyn.val6)
+		&& props_register(handle->props, &dyn7, _intercept, &handle->dyn.val7)
 
-	props_register(handle->props, &stat1, _intercept, &handle->stat.val1);
-	props_register(handle->props, &stat2, _intercept, &handle->stat.val2);
-	props_register(handle->props, &stat3, _intercept, &handle->stat.val3);
-	props_register(handle->props, &stat4, _intercept, &handle->stat.val4);
-	props_register(handle->props, &stat5, _intercept, &handle->stat.val5);
-	props_register(handle->props, &stat6, _intercept, &handle->stat.val6);
-
-	props_sort(handle->props);
+		&& props_register(handle->props, &stat1, _intercept_stat1, &handle->stat.val1)
+		&& (handle->urid.stat2 = props_register(handle->props, &stat2, _intercept,
+			&handle->stat.val2))
+		&& props_register(handle->props, &stat3, _intercept_stat3, &handle->stat.val3)
+		&& (handle->urid.stat4 = props_register(handle->props, &stat4, _intercept,
+			&handle->stat.val4))
+		&& props_register(handle->props, &stat5, _intercept, &handle->stat.val5)
+		&& props_register(handle->props, &stat6, _intercept, &handle->stat.val6) )
+	{
+		props_sort(handle->props);
+	}
+	else
+	{
+		_log_printf(handle, handle->log_trace, "ERR     : registering");
+		props_free(handle->props);
+		free(handle);
+		return NULL;
+	}
 
 	return handle;
 }
@@ -340,16 +420,16 @@ run(LV2_Handle instance, uint32_t nsamples)
 	uint32_t capacity = handle->event_out->atom.size;
 	LV2_Atom_Forge_Frame frame;
 	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
-	LV2_Atom_Forge_Ref ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+	handle->ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
 
 	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		if(ref)
-			props_advance(handle->props, &handle->forge, ev->time.frames, obj, &ref); //TODO handle return
+		if(handle->ref)
+			props_advance(handle->props, &handle->forge, ev->time.frames, obj, &handle->ref); //TODO handle return
 	}
-	if(ref)
+	if(handle->ref)
 		lv2_atom_forge_pop(&handle->forge, &frame);
 	else
 		lv2_atom_sequence_clear(handle->event_out);
