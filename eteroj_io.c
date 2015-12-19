@@ -681,9 +681,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	handle->tlsf = tlsf_create_with_pool(handle->mem, POOL_SIZE);
 
-	handle->uris.eteroj_stat = handle->map->map(handle->map->handle,
-		ETEROJ_STAT_URI);
-
 	handle->uris.log_note = handle->map->map(handle->map->handle,
 		LV2_LOG__Note);
 	handle->uris.log_error = handle->map->map(handle->map->handle,
@@ -719,9 +716,17 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	props_register(handle->props, &url_def, _intercept, &handle->osc_url);
-	props_register(handle->props, &status_def, NULL, &handle->osc_status);
-	props_sort(handle->props);
+	if(  props_register(handle->props, &url_def, _intercept, &handle->osc_url)
+		&& (handle->uris.eteroj_stat = props_register(handle->props, &status_def, NULL, &handle->osc_status)))
+	{
+		props_sort(handle->props);
+	}
+	else
+	{
+		props_free(handle->props);
+		free(handle);
+		return NULL;
+	}
 
 	return handle;
 }
@@ -1013,8 +1018,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	if(handle->status_updated)
 	{
-		props_impl_t *impl = _props_impl_search(handle->props, handle->uris.eteroj_stat); //FIXME only do lookup once
-		_props_get(handle->props, forge, nsamples-1, impl);
+		props_set(handle->props, forge, nsamples-1, handle->uris.eteroj_stat);
 
 		handle->status_updated = 0;
 	}
