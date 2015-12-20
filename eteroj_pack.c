@@ -83,7 +83,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 		return NULL;
 	}
 
-	props_register(handle->props, &pack_path_def, NULL, &handle->pack_path);
+	props_register(handle->props, &pack_path_def, PROP_EVENT_NONE, NULL, &handle->pack_path);
 	props_sort(handle->props);
 
 	return handle;

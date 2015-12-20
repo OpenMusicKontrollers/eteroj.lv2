@@ -546,16 +546,14 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	if( (impl->def == &record_def)
-		&& ( (event == PROP_EVENT_SET) || (event == PROP_EVENT_RESTORE) ) )
+	if(impl->def == &record_def)
 	{
 		if(handle->record)
 			_trigger_open_record(handle);
 		else
 			_trigger_open_play(handle);
 	}
-	else if( (impl->def == &path_def)
-		&& ( (event == PROP_EVENT_SET) || (event == PROP_EVENT_RESTORE) ) )
+	else if(impl->def == &path_def)
 	{
 		if(handle->record)
 			_trigger_open_record(handle);
@@ -633,8 +631,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	if(  props_register(handle->props, &record_def, _intercept, &handle->record)
-		&& props_register(handle->props, &path_def, _intercept, &handle->path))
+	if(  props_register(handle->props, &record_def, PROP_EVENT_WRITE, _intercept, &handle->record)
+		&& props_register(handle->props, &path_def, PROP_EVENT_WRITE, _intercept, &handle->path))
 	{
 		props_sort(handle->props);
 	}
