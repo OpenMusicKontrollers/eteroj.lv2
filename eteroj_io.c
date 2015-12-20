@@ -59,6 +59,7 @@ struct _plughandle_t {
 		LV2_URID subject;
 
 		LV2_URID eteroj_stat;
+		LV2_URID eteroj_err;
 
 		LV2_URID log_note;
 		LV2_URID log_error;
@@ -70,18 +71,18 @@ struct _plughandle_t {
 	LV2_Atom_Forge forge;
 	LV2_Atom_Forge_Ref ref;
 
-	volatile int needs_flushing;
-	volatile int status_updated;
-	volatile int reconnection_requested;
+	volatile bool needs_flushing;
+	volatile bool status_updated;
+	volatile bool reconnection_requested;
 	char worker_url [512];
 	char osc_url [512];
-	char osc_status [512];
+	int32_t osc_status;
+	char osc_error [512];
 
 	LV2_Log_Log *log;
 
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
-	float *state;
 
 	uv_loop_t loop;
 
@@ -223,7 +224,7 @@ _worker_api_url(osc_time_t timestamp, const char *path, const char *fmt,
 	if(handle->data.stream)
 		osc_stream_free(handle->data.stream);
 	else
-		handle->reconnection_requested = 1;
+		handle->reconnection_requested = true;
 
 	return 1;
 }
@@ -251,7 +252,7 @@ _work(LV2_Handle instance,
 		handle->data.stream = osc_stream_new(&handle->loop, handle->worker_url,
 			&handle->data.driver, handle);
 
-		handle->reconnection_requested = 0;
+		handle->reconnection_requested = false;
 	}
 
 	handle->respond = respond;
@@ -341,7 +342,7 @@ _data_free(void *data)
 	plughandle_t *handle = data;
 
 	handle->data.stream = NULL;
-	handle->reconnection_requested = 1;
+	handle->reconnection_requested = true;
 }
 
 // rt
@@ -351,12 +352,11 @@ _resolve(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	*handle->state = STATE_READY;
+	handle->osc_status = STATE_READY;
+	sprintf(handle->osc_error, "");
 
-	sprintf(handle->osc_status, "resolved");
-
-	handle->needs_flushing = 1;
-	handle->status_updated = 1;
+	handle->needs_flushing = true;
+	handle->status_updated = true;
 
 	return 1;
 }
@@ -368,11 +368,10 @@ _timeout(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	*handle->state = STATE_TIMEDOUT;
+	handle->osc_status = STATE_TIMEDOUT;
+	sprintf(handle->osc_error, "");
 
-	sprintf(handle->osc_status, "timed out");
-
-	handle->status_updated = 1;
+	handle->status_updated = true;
 
 	return 1;
 }
@@ -384,8 +383,6 @@ _error(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	*handle->state = STATE_ERRORED;
-
 	const char *where;
 	const char *what;
 
@@ -393,9 +390,10 @@ _error(osc_time_t timestamp, const char *path, const char *fmt,
 	ptr = osc_get_string(ptr, &where);
 	ptr = osc_get_string(ptr, &what);
 
-	sprintf(handle->osc_status, "%s (%s)\n", where, what);
+	handle->osc_status = STATE_ERRORED;
+	sprintf(handle->osc_error, "%s (%s)\n", where, what);
 
-	handle->status_updated = 1;
+	handle->status_updated = true;
 
 	return 1;
 }
@@ -407,12 +405,11 @@ _connect(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	*handle->state = STATE_CONNECTED;
+	handle->osc_status = STATE_CONNECTED;
+	sprintf(handle->osc_error, "");
 
-	sprintf(handle->osc_status, "connected");
-
-	handle->needs_flushing = 1;
-	handle->status_updated = 1;
+	handle->needs_flushing = true;
+	handle->status_updated = true;
 
 	return 1;
 }
@@ -424,11 +421,10 @@ _disconnect(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	*handle->state = STATE_READY;
+	handle->osc_status = STATE_READY;
+	sprintf(handle->osc_error, "");
 
-	sprintf(handle->osc_status, "disconnected");
-
-	handle->status_updated = 1;
+	handle->status_updated = true;
 
 	return 1;
 }
@@ -612,7 +608,6 @@ static const osc_unroll_inject_t inject = {
 };
 
 static const props_def_t url_def = {
-	.label = "Url",
 	.property = ETEROJ_URL_URI,
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__String,
@@ -621,8 +616,14 @@ static const props_def_t url_def = {
 };
 
 static const props_def_t status_def = {
-	.label = "Status",
 	.property = ETEROJ_STAT_URI,
+	.access = LV2_PATCH__readable,
+	.type = LV2_ATOM__Int,
+	.mode = PROP_MODE_STATIC
+};
+
+static const props_def_t error_def = {
+	.property = ETEROJ_ERR_URI,
 	.access = LV2_PATCH__readable,
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_STATIC,
@@ -707,9 +708,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.free = _data_free;
 
 	strcpy(handle->osc_url, "osc.udp4://localhost:9090");
-	strcpy(handle->osc_status, "");
+	handle->osc_status = STATE_IDLE;
+	strcpy(handle->osc_error, "");
 
-	handle->props = props_new(2, descriptor->URI, handle->map, handle);
+	handle->props = props_new(3, descriptor->URI, handle->map, handle);
 	if(!handle->props)
 	{
 		free(handle);
@@ -717,7 +719,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	if(  props_register(handle->props, &url_def, _intercept, &handle->osc_url)
-		&& (handle->uris.eteroj_stat = props_register(handle->props, &status_def, NULL, &handle->osc_status)))
+		&& (handle->uris.eteroj_stat = props_register(handle->props, &status_def, NULL, &handle->osc_status))
+		&& (handle->uris.eteroj_err = props_register(handle->props, &error_def, NULL, &handle->osc_error)))
 	{
 		props_sort(handle->props);
 	}
@@ -743,9 +746,6 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 			break;
 		case 1:
 			handle->osc_out = (LV2_Atom_Sequence *)data;
-			break;
-		case 2:
-			handle->state = (float *)data;
 			break;
 		default:
 			break;
@@ -907,7 +907,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
 	uint32_t capacity;
-	handle->needs_flushing = 0;
+	handle->needs_flushing = false;
 
 	// prepare sequence forges
 	capacity = handle->osc_out->atom.size;
@@ -943,7 +943,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 		}
 	}
 	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
-		handle->needs_flushing = 1;
+		handle->needs_flushing = true;
 
 	// reschedule scheduled bundles
 	if(handle->osc_sched)
@@ -1019,8 +1019,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 	if(handle->status_updated)
 	{
 		props_set(handle->props, forge, nsamples-1, handle->uris.eteroj_stat);
+		props_set(handle->props, forge, nsamples-1, handle->uris.eteroj_err);
 
-		handle->status_updated = 0;
+		handle->status_updated = false;
 	}
 
 	if(handle->ref)

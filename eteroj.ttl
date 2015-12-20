@@ -61,10 +61,20 @@ eteroj:url
 	rdfs:label "Url" ;
 	rdfs:range atom:String .
 
+eteroj:error
+	a lv2:Parameter ;
+	rdfs:label "Error" ;
+	rdfs:range atom:String .
+
 eteroj:status
 	a lv2:Parameter ;
 	rdfs:label "Status" ;
-	rdfs:range atom:String .
+	rdfs:range atom:Int ;
+	lv2:scalePoint [ rdfs:label "Idle" ;			rdf:value 0 ] ;
+	lv2:scalePoint [ rdfs:label "Ready" ;			rdf:value 1 ] ;
+	lv2:scalePoint [ rdfs:label "Timedout" ;	rdf:value 2 ] ;
+	lv2:scalePoint [ rdfs:label "Errored" ;		rdf:value 3 ] ;
+	lv2:scalePoint [ rdfs:label "Connected" ;	rdf:value 4 ] .
 
 eteroj:pack_path
 	a lv2:Parameter ;
@@ -75,7 +85,7 @@ eteroj:pack_path
 eteroj:io
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
-	doap:name "Eteroj Comm" ;
+	doap:name "Eteroj IO" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
@@ -106,28 +116,12 @@ eteroj:io
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;
 		lv2:designation lv2:control ;
-	] , [
-		# control output ports
-	  a lv2:OutputPort ,
-			lv2:ControlPort ;
-		lv2:index 2 ;
-		lv2:symbol "state" ;
-		lv2:name "State" ;
-		lv2:default 0.0 ;
-		lv2:minimum 0.0 ;
-		lv2:maximum 4.0 ;
-		lv2:portProperty lv2:integer ;
-		lv2:portProperty lv2:enumeration ;
-		lv2:scalePoint [ rdfs:label "Idle" ;					rdf:value 0 ] ;
-		lv2:scalePoint [ rdfs:label "Ready" ;					rdf:value 1 ] ;
-		lv2:scalePoint [ rdfs:label "Timedout" ;			rdf:value 2 ] ;
-		lv2:scalePoint [ rdfs:label "Errored" ;				rdf:value 3 ] ;
-		lv2:scalePoint [ rdfs:label "Connected" ;			rdf:value 4 ] ;
 	] ;
 
 	# parameters
 	patch:writable eteroj:url ;
 	patch:readable eteroj:status ;
+	patch:readable eteroj:error ;
 
 	# default state
 	state:state [
