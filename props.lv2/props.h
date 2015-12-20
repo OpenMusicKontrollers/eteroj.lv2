@@ -54,7 +54,7 @@ typedef struct _props_impl_t props_impl_t;
 typedef struct _props_t props_t;
 
 // function callbacks
-typedef void (*props_change_cb_t)(
+typedef void (*props_event_cb_t)(
 	void *data,
 	LV2_Atom_Forge *forge,
 	int64_t frames,
@@ -86,17 +86,23 @@ union _props_raw_t {
 };
 
 enum _props_mode_t {
-	PROP_MODE_STATIC	= 0,
-	PROP_MODE_DYNAMIC
+	PROP_MODE_STATIC			= 0,
+	PROP_MODE_DYNAMIC			= 1
 };
 
 enum _props_event_t {
-	PROP_EVENT_GET,
-	PROP_EVENT_SET,
-	PROP_EVENT_REGISTER,
-	PROP_EVENT_SAVE,
-	PROP_EVENT_RESTORE
+	PROP_EVENT_GET				= (1 << 0),
+	PROP_EVENT_SET				= (1 << 1),
+	PROP_EVENT_SAVE				= (1 << 2),
+	PROP_EVENT_RESTORE		= (1 << 3),
+	PROP_EVENT_REGISTER		= (1 << 4)
 };
+
+#define PROP_EVENT_NONE		(0)
+#define PROP_EVENT_READ		(PROP_EVENT_GET		| PROP_EVENT_SAVE)
+#define PROP_EVENT_WRITE	(PROP_EVENT_SET		| PROP_EVENT_RESTORE)
+#define PROP_EVENT_RW			(PROP_EVENT_READ	| PROP_EVENT_WRITE)
+#define PROP_EVENT_ALL		(PROP_EVENT_RW		| PROP_EVENT_REGISTER)
 
 struct _props_scale_point_t {
 	const char *label;
@@ -130,7 +136,8 @@ struct _props_impl_t {
 	LV2_URID unit;
 	const props_type_t *type;
 	const props_def_t *def;
-	props_change_cb_t change_cb;
+	props_event_t event_mask;
+	props_event_cb_t event_cb;
 	void *value;
 };
 
@@ -192,8 +199,8 @@ props_free(props_t *props);
 
 // rt-safe
 static inline LV2_URID
-props_register(props_t *props, const props_def_t *def, props_change_cb_t change_cb,
-	void *value);
+props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
+	props_event_cb_t event_cb, void *value);
 
 // rt-safe
 static inline void
@@ -777,8 +784,8 @@ props_free(props_t *props)
 }
 
 static inline LV2_URID
-props_register(props_t *props, const props_def_t *def, props_change_cb_t change_cb,
-	void *value)
+props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
+	props_event_cb_t event_cb, void *value)
 {
 	if(props->nimpls >= props->max_nimpls)
 		return 0;
@@ -800,7 +807,8 @@ props_register(props_t *props, const props_def_t *def, props_change_cb_t change_
 	impl->unit = def->unit ? props->map->map(props->map->handle, def->unit) : 0;
 	impl->type = props_type;
 	impl->def = def;
-	impl->change_cb = change_cb;
+	impl->event_mask = event_mask;
+	impl->event_cb = event_cb;
 	impl->value = value;
 
 	//TODO register?
@@ -849,14 +857,14 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 				{
 					if(*ref)
 						*ref = _props_reg(props, forge, frames, impl);
-					if(impl->change_cb)
-						impl->change_cb(props->data, forge, frames, PROP_EVENT_REGISTER, impl);
+					if(impl->event_cb && (impl->event_mask & PROP_EVENT_REGISTER) )
+						impl->event_cb(props->data, forge, frames, PROP_EVENT_REGISTER, impl);
 				}
 
 				if(*ref)
 					*ref = _props_get(props, forge, frames, impl);
-				if(impl->change_cb)
-					impl->change_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
+				if(impl->event_cb && (impl->event_mask & PROP_EVENT_GET) )
+					impl->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
 			}
 			return 1;
 		}
@@ -866,8 +874,8 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			if(impl)
 			{
 				*ref = _props_get(props, forge, frames, impl);
-				if(impl->change_cb)
-					impl->change_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
+				if(impl->event_cb && (impl->event_mask & PROP_EVENT_GET) )
+					impl->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
 				return 1;
 			}
 		}
@@ -897,8 +905,8 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		if(impl && (impl->access == props->urid.patch_writable) )
 		{
 			_props_set(props, forge, impl, value->type, LV2_ATOM_BODY_CONST(value));
-			if(impl->change_cb)
-				impl->change_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
+			if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
+				impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			return 1;
 		}
 	}
@@ -920,6 +928,14 @@ static inline LV2_State_Status
 props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store,
 	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features)
 {
+	const LV2_State_Map_Path *map_path = NULL;
+
+	for(unsigned i = 0; features[i]; i++)
+	{
+		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
+			map_path = features[i]->data;
+	}
+
 	for(unsigned i = 0; i < props->nimpls; i++)
 	{
 		props_impl_t *impl = &props->impls[i];
@@ -931,10 +947,25 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 			? impl->type->size_cb(impl->value)
 			: impl->type->size;
 
-		store(state, impl->property, impl->value, size, impl->type->urid, flags);
+		if( map_path && (impl->type->urid == forge->Path) )
+		{
+			const char *path = strstr(impl->value, "file://")
+				? impl->value + 7 // skip "file://"
+				: impl->value;
+			char *abstract = map_path->abstract_path(map_path->handle, path);
+			if(abstract)
+			{
+				store(state, impl->property, abstract, strlen(abstract) + 1, impl->type->urid, flags);
+				free(abstract);
+			}
+		}
+		else // !Path
+		{
+			store(state, impl->property, impl->value, size, impl->type->urid, flags);
+		}
 
-		if(impl->change_cb)
-			impl->change_cb(props->data, forge, 0, PROP_EVENT_SAVE, impl);
+		if(impl->event_cb && (impl->event_mask & PROP_EVENT_SAVE) )
+			impl->event_cb(props->data, forge, 0, PROP_EVENT_SAVE, impl);
 	}
 
 	return LV2_STATE_SUCCESS;
@@ -944,6 +975,14 @@ static inline LV2_State_Status
 props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function retrieve,
 	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features)
 {
+	const LV2_State_Map_Path *map_path = NULL;
+
+	for(unsigned i = 0; features[i]; i++)
+	{
+		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
+			map_path = features[i]->data;
+	}
+
 	for(unsigned i = 0; i < props->nimpls; i++)
 	{
 		props_impl_t *impl = &props->impls[i];
@@ -958,9 +997,22 @@ props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function
 
 		if(value)
 		{
-			_props_set(props, forge, impl, type, value);
-			if(impl->change_cb)
-				impl->change_cb(props->data, forge, 0, PROP_EVENT_RESTORE, impl);
+			if( map_path && (impl->type->urid == forge->Path) )
+			{
+				char *absolute = map_path->absolute_path(map_path->handle, value);
+				if(absolute)
+				{
+					_props_set(props, forge, impl, type, absolute);
+					free(absolute);
+				}
+			}
+			else // !Path
+			{
+				_props_set(props, forge, impl, type, value);
+			}
+
+			if(impl->event_cb && (impl->event_mask & PROP_EVENT_RESTORE) )
+				impl->event_cb(props->data, forge, 0, PROP_EVENT_RESTORE, impl);
 		}
 		else
 		{

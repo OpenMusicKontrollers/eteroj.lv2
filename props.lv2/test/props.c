@@ -264,10 +264,13 @@ _intercept_dyn1(void *data, LV2_Atom_Forge *forge, int64_t frames,
 
 	_intercept(data, forge, frames, event, impl);
 
-	handle->dyn.val2 = handle->dyn.val1 * 2;
+	if(event & PROP_EVENT_WRITE)
+	{
+		handle->dyn.val2 = handle->dyn.val1 * 2;
 
-	if(handle->ref)
-		handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn2);
+		if(handle->ref)
+			handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn2);
+	}
 }
 
 static void
@@ -278,10 +281,13 @@ _intercept_dyn3(void *data, LV2_Atom_Forge *forge, int64_t frames,
 
 	_intercept(data, forge, frames, event, impl);
 
-	handle->dyn.val4 = handle->dyn.val3 * 2;
+	if(event & PROP_EVENT_WRITE)
+	{
+		handle->dyn.val4 = handle->dyn.val3 * 2;
 
-	if(handle->ref)
-		handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn4);
+		if(handle->ref)
+			handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn4);
+	}
 }
 
 static void
@@ -292,10 +298,13 @@ _intercept_stat1(void *data, LV2_Atom_Forge *forge, int64_t frames,
 
 	_intercept(data, forge, frames, event, impl);
 
-	handle->stat.val2 = handle->stat.val1 * 2;
+	if(event & PROP_EVENT_WRITE)
+	{
+		handle->stat.val2 = handle->stat.val1 * 2;
 
-	if(handle->ref)
-		handle->ref = props_set(handle->props, forge, frames, handle->urid.stat2);
+		if(handle->ref)
+			handle->ref = props_set(handle->props, forge, frames, handle->urid.stat2);
+	}
 }
 
 static void
@@ -306,10 +315,32 @@ _intercept_stat3(void *data, LV2_Atom_Forge *forge, int64_t frames,
 
 	_intercept(data, forge, frames, event, impl);
 
-	handle->stat.val4 = handle->stat.val3 * 2;
+	if(event & PROP_EVENT_WRITE)
+	{
+		handle->stat.val4 = handle->stat.val3 * 2;
 
-	if(handle->ref)
-		handle->ref = props_set(handle->props, forge, frames, handle->urid.stat4);
+		if(handle->ref)
+			handle->ref = props_set(handle->props, forge, frames, handle->urid.stat4);
+	}
+}
+
+static void
+_intercept_stat6(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, forge, frames, event, impl);
+
+	if(event & PROP_EVENT_WRITE)
+	{
+		const char *path = strstr(handle->stat.val6, "file://")
+			? handle->stat.val6 + 7 // skip "file://"
+			: handle->stat.val6;
+		FILE *f = fopen(path, "wb"); // create empty file
+		if(f)
+			fclose(f);
+	}
 }
 
 static LV2_Handle
@@ -362,24 +393,24 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->dyn.val6 = true;
 	handle->dyn.val7[0] = '\0';
 
-	if(  props_register(handle->props, &dyn1, _intercept_dyn1, &handle->dyn.val1)
-		&& (handle->urid.dyn2 = props_register(handle->props, &dyn2, _intercept,
-			&handle->dyn.val2))
-		&& props_register(handle->props, &dyn3, _intercept_dyn3, &handle->dyn.val3)
-		&& (handle->urid.dyn4 = props_register(handle->props, &dyn4, _intercept,
-			&handle->dyn.val4))
-		&& props_register(handle->props, &dyn5, _intercept, &handle->dyn.val5)
-		&& props_register(handle->props, &dyn6, _intercept, &handle->dyn.val6)
-		&& props_register(handle->props, &dyn7, _intercept, &handle->dyn.val7)
+	if(  props_register(handle->props, &dyn1, PROP_EVENT_ALL, _intercept_dyn1, &handle->dyn.val1)
+		&& (handle->urid.dyn2 =
+				props_register(handle->props, &dyn2, PROP_EVENT_ALL, _intercept, &handle->dyn.val2))
+		&& props_register(handle->props, &dyn3, PROP_EVENT_ALL, _intercept_dyn3, &handle->dyn.val3)
+		&& (handle->urid.dyn4 =
+				props_register(handle->props, &dyn4, PROP_EVENT_ALL, _intercept, &handle->dyn.val4))
+		&& props_register(handle->props, &dyn5, PROP_EVENT_ALL, _intercept, &handle->dyn.val5)
+		&& props_register(handle->props, &dyn6, PROP_EVENT_ALL, _intercept, &handle->dyn.val6)
+		&& props_register(handle->props, &dyn7, PROP_EVENT_ALL, _intercept, &handle->dyn.val7)
 
-		&& props_register(handle->props, &stat1, _intercept_stat1, &handle->stat.val1)
-		&& (handle->urid.stat2 = props_register(handle->props, &stat2, _intercept,
-			&handle->stat.val2))
-		&& props_register(handle->props, &stat3, _intercept_stat3, &handle->stat.val3)
-		&& (handle->urid.stat4 = props_register(handle->props, &stat4, _intercept,
-			&handle->stat.val4))
-		&& props_register(handle->props, &stat5, _intercept, &handle->stat.val5)
-		&& props_register(handle->props, &stat6, _intercept, &handle->stat.val6) )
+		&& props_register(handle->props, &stat1, PROP_EVENT_ALL, _intercept_stat1, &handle->stat.val1)
+		&& (handle->urid.stat2 =
+				props_register(handle->props, &stat2, PROP_EVENT_ALL, _intercept, &handle->stat.val2))
+		&& props_register(handle->props, &stat3, PROP_EVENT_ALL, _intercept_stat3, &handle->stat.val3)
+		&& (handle->urid.stat4 =
+				props_register(handle->props, &stat4, PROP_EVENT_ALL, _intercept, &handle->stat.val4))
+		&& props_register(handle->props, &stat5, PROP_EVENT_ALL, _intercept, &handle->stat.val5)
+		&& props_register(handle->props, &stat6, PROP_EVENT_ALL, _intercept_stat6, &handle->stat.val6) )
 	{
 		props_sort(handle->props);
 	}
