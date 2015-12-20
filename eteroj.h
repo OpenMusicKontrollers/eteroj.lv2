@@ -40,7 +40,9 @@
 #define ETEROJ_STAT_URI								ETEROJ_URI"#status"
 #define ETEROJ_ERR_URI								ETEROJ_URI"#error"
 
-#define ETEROJ_PATH_URI								ETEROJ_URI"#path"
+#define ETEROJ_DISK_RECORD_URI				ETEROJ_URI"#disk_record"
+#define ETEROJ_DISK_PATH_URI					ETEROJ_URI"#disk_path"
+
 #define ETEROJ_PACK_PATH_URI					ETEROJ_URI"#pack_path"
 
 // plugin uris

@@ -129,14 +129,24 @@ eteroj:io
 	] .
 
 # Disk Plugin
+eteroj:disk_record
+	a lv2:Parameter ;
+	rdfs:label "Record" ;
+	rdfs:range atom:Bool .
+
+eteroj:disk_path
+	a lv2:Parameter ;
+	rdfs:label "File path" ;
+	rdfs:range atom:Path .
+
 eteroj:disk
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
-	doap:name "Eteroj Recorder/Player" ;
+	doap:name "Eteroj Disk" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
-	lv2:requiredFeature work:schedule, urid:map, state:makePath ;
+	lv2:requiredFeature work:schedule, urid:map, state:makePath, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	lv2:port [
@@ -147,6 +157,7 @@ eteroj:disk
 		atom:supports time:Position ;
 		atom:supports atom:Object ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 0 ;
 		lv2:symbol "osc_in" ;
 		lv2:name "OSC Input" ;
@@ -158,21 +169,20 @@ eteroj:disk
 		atom:bufferType atom:Sequence ;
 		atom:supports atom:Object ;
 		atom:supports osc:Event ;
+		atom:supports patch:Message ;
 		lv2:index 1 ;
 		lv2:symbol "osc_out" ;
 		lv2:name "OSC Output" ;
 		lv2:designation lv2:control ;
-	] , [
-		# control input ports
-	  a lv2:InputPort ,
-			lv2:ControlPort ;
-		lv2:index 2 ;
-		lv2:symbol "record" ;
-		lv2:name "Record" ;
-		lv2:default 1 ;
-		lv2:minimum 0 ;
-		lv2:maximum 1 ;
-		lv2:portProperty lv2:toggled;
+	] ;
+ 
+	patch:writable
+		eteroj:disk_record ,
+		eteroj:disk_path ;
+
+	state:state [
+		eteroj:disk_record false ;
+		eteroj:disk_path <seq.osc> ;
 	] .
 
 # Query Plugin
@@ -233,9 +243,8 @@ eteroj:cloak
 		lv2:symbol "osc_in" ;
 		lv2:name "OSC Input" ;
 		lv2:designation lv2:control ;
-	] ;
+	] , [
 	# output event port
-	lv2:port [
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
@@ -265,9 +274,8 @@ eteroj:decloak
 		lv2:symbol "midi_in" ;
 		lv2:name "MIDI Input" ;
 		lv2:designation lv2:control ;
-	] ;
+	] , [
 	# output event port
-	lv2:port [
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
@@ -299,9 +307,8 @@ eteroj:unpack
 		lv2:symbol "osc_in" ;
 		lv2:name "OSC Input" ;
 		lv2:designation lv2:control ;
-	] ;
+	] , [
 	# output event port
-	lv2:port [
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
@@ -334,9 +341,8 @@ eteroj:pack
 		lv2:symbol "midi_in" ;
 		lv2:name "MIDI Input" ;
 		lv2:designation lv2:control ;
-	] ;
+	] , [
 	# output event port
-	lv2:port [
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
@@ -350,7 +356,8 @@ eteroj:pack
 	] ;
 
 	# parameters
-	patch:writable eteroj:pack_path ;
+	patch:writable
+		eteroj:pack_path ;
 
 	# default state
 	state:state [

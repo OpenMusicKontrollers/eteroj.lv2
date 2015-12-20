@@ -23,6 +23,7 @@
 #include <timely.h>
 #include <varchunk.h>
 #include <lv2_osc.h>
+#include <props.h>
 #include <osc.h>
 
 #define BUF_SIZE 0x10000
@@ -53,19 +54,17 @@ struct _plughandle_t {
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
 	struct {
-		LV2_URID eteroj_path;
 		LV2_URID eteroj_drain;
 	} uris;
 
 	timely_t timely;
 	LV2_Worker_Schedule *sched;
-	bool restored; //TODO use properly
+
+	props_t *props;
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
-	const float *record;
-
-	bool record_i;
+	int32_t record;
 
 	double beats_period;
 	double beats_upper;
@@ -90,6 +89,21 @@ struct _plughandle_t {
 
 	int bndl_cnt;
 	osc_data_t *bndl [32]; // 32 nested bundles should be enough
+};
+
+static const props_def_t record_def = {
+	.property = ETEROJ_DISK_RECORD_URI,
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Bool,
+	.mode = PROP_MODE_STATIC
+};
+
+static const props_def_t path_def = {
+	.property = ETEROJ_DISK_PATH_URI,
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Path,
+	.mode = PROP_MODE_STATIC,
+	.maximum.i = 1024
 };
 
 static inline void
@@ -519,10 +533,34 @@ _cb(timely_t *timely, int64_t frames, LV2_URID type, void *data)
 	{
 		double beats = _beats(&handle->timely);
 
-		if(handle->record_i)
+		if(handle->record)
 			_reposition_rec(handle, beats);
 		else
 			_reposition_play(handle, beats);
+	}
+}
+
+static void
+_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	if( (impl->def == &record_def)
+		&& ( (event == PROP_EVENT_SET) || (event == PROP_EVENT_RESTORE) ) )
+	{
+		if(handle->record)
+			_trigger_open_record(handle);
+		else
+			_trigger_open_play(handle);
+	}
+	else if( (impl->def == &path_def)
+		&& ( (event == PROP_EVENT_SET) || (event == PROP_EVENT_RESTORE) ) )
+	{
+		if(handle->record)
+			_trigger_open_record(handle);
+		else
+			_trigger_open_play(handle);
 	}
 }
 
@@ -583,11 +621,30 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	strcpy(handle->path, tmp);
 	free(tmp);
 	
-	handle->uris.eteroj_path = handle->map->map(handle->map->handle, ETEROJ_PATH_URI);
 	handle->uris.eteroj_drain = handle->map->map(handle->map->handle, ETEROJ_DRAIN_URI);
 
 	handle->to_disk = varchunk_new(BUF_SIZE);
 	handle->from_disk = varchunk_new(BUF_SIZE);
+
+	handle->props = props_new(2, descriptor->URI, handle->map, handle);
+	if(!handle->props)
+	{
+		free(handle);
+		return NULL;
+	}
+
+	if(  props_register(handle->props, &record_def, _intercept, &handle->record)
+		&& props_register(handle->props, &path_def, _intercept, &handle->path))
+	{
+		props_sort(handle->props);
+	}
+	else
+	{
+		props_free(handle->props);
+		free(handle);
+		return NULL;
+	}
+
 
 	return handle;
 }
@@ -605,9 +662,6 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 		case 1:
 			handle->event_out = (LV2_Atom_Sequence *)data;
 			break;
-		case 2:
-			handle->record = (const float *)data;
-			break;
 		default:
 			break;
 	}
@@ -619,7 +673,6 @@ activate(LV2_Handle instance)
 	plughandle_t *handle = instance;
 
 	handle->rolling = false;
-	handle->restored = true;
 	handle->seek_beats = 0.0;
 
 	handle->beats_period = 0.0;
@@ -632,24 +685,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 	plughandle_t *handle = instance;
 	uint32_t capacity = handle->event_out->atom.size;
 
-	bool record_i = floor(*handle->record);
-	bool record_has_changed = record_i != handle->record_i;
-	handle->record_i = record_i;
-
-	// trigger pre triggers
-	if(handle->restored || record_has_changed)
-	{
-		if(record_i)
-			_trigger_open_record(handle);
-		else
-			_trigger_open_play(handle);
-
-		handle->restored = false;
-	}
-
 	LV2_Atom_Forge_Frame frame;
 	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
-	lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+	LV2_Atom_Forge_Ref ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
 
 	handle->beats_period = handle->beats_upper;
 
@@ -658,12 +696,14 @@ run(LV2_Handle instance, uint32_t nsamples)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 		const int time_event = timely_advance(&handle->timely, obj, last_t, ev->time.frames);
+		if(!time_event)
+			props_advance(handle->props, &handle->forge, ev->time.frames, obj, &ref);
 		handle->beats_upper = _beats(&handle->timely);
 
-		if(record_i && !time_event && handle->rolling)
+		if(handle->record && !time_event && handle->rolling)
 			_rec(handle, ev); // dont' record time position signals
 	
-		if(!record_i && handle->rolling)
+		if(!handle->record && handle->rolling)
 			_play(handle, ev->time.frames, capacity);
 
 		last_t = ev->time.frames;
@@ -672,13 +712,13 @@ run(LV2_Handle instance, uint32_t nsamples)
 	timely_advance(&handle->timely, NULL, last_t, nsamples);
 	handle->beats_upper = _beats(&handle->timely);
 
-	if(!record_i && handle->rolling)
+	if(!handle->record && handle->rolling)
 		_play(handle, nsamples, capacity);
 
 	// trigger post triggers
 	if(handle->rolling)
 	{
-		if(record_i)
+		if(handle->record)
 			_trigger_record(handle);
 		else
 			_trigger_play(handle);
@@ -709,6 +749,9 @@ cleanup(LV2_Handle instance)
 	if(handle->from_disk)
 		varchunk_free(handle->from_disk);
 
+	if(handle->props)
+		props_free(handle->props);
+
 	if(handle->io)
 		fclose(handle->io);
 
@@ -722,27 +765,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	const LV2_State_Map_Path *map_path = NULL;
-
-	for(int i=0; features[i]; i++)
-		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
-			map_path = features[i]->data;
-
-	if(!map_path)
-	{
-		fprintf(stderr, "_state_save: LV2_STATE__mapPath not supported.");
-		return LV2_STATE_ERR_UNKNOWN;
-	}
-
-	const char *abstract = map_path->abstract_path(map_path->handle, handle->path);
-
-	return store(
-		state,
-		handle->uris.eteroj_path,
-		abstract,
-		strlen(abstract) + 1,
-		handle->forge.Path,
-		LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE);
+	return props_save(handle->props, &handle->forge, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -752,42 +775,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	const LV2_State_Map_Path *map_path = NULL;
-
-	for(int i=0; features[i]; i++)
-		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
-			map_path = features[i]->data;
-
-	if(!map_path)
-	{
-		fprintf(stderr, "_state_restore: LV2_STATE__mapPath not supported.");
-		return LV2_STATE_ERR_UNKNOWN;
-	}
-
-	size_t size;
-	uint32_t type;
-	uint32_t flags2;
-	const char *path = retrieve(
-		state,
-		handle->uris.eteroj_path,
-		&size,
-		&type,
-		&flags2
-	);
-
-	// check type
-	if(path && (type != handle->forge.Path) )
-		return LV2_STATE_ERR_BAD_TYPE;
-
-	if(!path)
-		path = DEFAULT_FILE_NAME;
-
-	const char *absolute = map_path->absolute_path(map_path->handle, path);
-
-	strcpy(handle->path, absolute);
-	handle->restored = true;
-
-	return LV2_STATE_SUCCESS;
+	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
