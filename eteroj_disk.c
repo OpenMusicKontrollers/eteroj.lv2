@@ -66,6 +66,9 @@ struct _plughandle_t {
 	LV2_Atom_Sequence *event_out;
 	int32_t record;
 
+	LV2_Log_Log *log;
+	LV2_Log_Logger logger;
+
 	double beats_period;
 	double beats_upper;
 
@@ -455,7 +458,9 @@ _play(plughandle_t *handle, int64_t to, uint32_t capacity)
 		handle->offset = round((src->time.beats - handle->beats_period) * TIMELY_FRAMES_PER_BEAT(&handle->timely));
 		if(handle->offset < 0)
 		{
-			//fprintf(stderr, "_play: event late %li\n", dst->time.frames);
+			if(handle->log)
+				lv2_log_trace(&handle->logger, "_play: event late %li", handle->offset);
+
 			handle->offset = 0;
 		}
 
@@ -492,7 +497,9 @@ _rec(plughandle_t *handle, const LV2_Atom_Event *src)
 
 			varchunk_write_advance(handle->to_disk, sizeof(LV2_Atom_Event) + size);
 		}
-	}
+	} 
+	else if(handle->log)
+		lv2_log_trace(&handle->logger, "_rec: ringbuffer overflow");
 }
 
 static inline void
@@ -576,6 +583,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_LOG__log))
+			handle->log = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
 			handle->sched = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_STATE__makePath))
@@ -612,6 +621,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		| TIMELY_MASK_FRAMES_PER_SECOND
 		| TIMELY_MASK_SPEED;
 	timely_init(&handle->timely, handle->map, rate, mask, _cb, handle);
+	if(handle->log)
+		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	osc_forge_init(&handle->oforge, handle->map);
 
@@ -828,8 +839,8 @@ _work(LV2_Handle instance,
 						}
 						else
 						{
-							if(!feof(handle->io))
-								fprintf(stderr, "play: reading event body failed.\n");
+							if(!feof(handle->io) && handle->log)
+								lv2_log_warning(&handle->logger, "play: reading event body failed.");
 						}
 					}
 					else
@@ -841,8 +852,8 @@ _work(LV2_Handle instance,
 				}
 				else
 				{
-					if(!feof(handle->io))
-						fprintf(stderr, "play: reading event header failed.\n");
+					if(!feof(handle->io) && handle->log)
+						lv2_log_warning(&handle->logger, "play: reading event header failed.");
 				}
 			}
 
@@ -863,9 +874,9 @@ _work(LV2_Handle instance,
 					handle->seek_beats = beats;
 					varchunk_read_advance(handle->to_disk);
 				}
-				else
+				else if(handle->log)
 				{
-					fprintf(stderr, "record: writing event failed.\n");
+					lv2_log_warning(&handle->logger, "record: writing event failed.");
 					break;
 				}
 			}
@@ -874,12 +885,14 @@ _work(LV2_Handle instance,
 		}
 		case JOB_SEEK:
 		{
-			fprintf(stderr, "seek: request to %lf\n", job->beats);
+			if(handle->log)
+				lv2_log_note(&handle->logger, "seek: request to %lf", job->beats);
 
 			// rewind to start of file
 			if(job->beats < handle->seek_beats)
 			{
-				fprintf(stderr, "seek rewind\n");
+				if(handle->log)
+					lv2_log_note(&handle->logger, "seek rewind");
 				fseek(handle->io, 0, SEEK_SET);
 				handle->seek_beats = 0.0;
 			}
@@ -906,14 +919,15 @@ _work(LV2_Handle instance,
 
 					// unread event header
 					fseek(handle->io, -sizeof(LV2_Atom_Event), SEEK_CUR); //FIXME check return
-					fprintf(stderr, "seek: seeked to %lf\n", handle->seek_beats);
+					if(handle->log)
+						lv2_log_note(&handle->logger, "seek: seeked to %lf", handle->seek_beats);
 
 					break;
 				}
 				else
 				{
-					if(!feof(handle->io))
-						fprintf(stderr, "seek: reading event header failed.\n");
+					if(!feof(handle->io) && handle->log)
+						lv2_log_warning(&handle->logger, "seek: reading event header failed.");
 				}
 			}
 
@@ -924,7 +938,7 @@ _work(LV2_Handle instance,
 			// inject drain marker event
 			LV2_Atom_Event *ev;
 			const size_t len = sizeof(LV2_Atom_Event);
-			if((ev = varchunk_write_request(handle->from_disk, len)))
+			if((ev = varchunk_write_request(handle->from_disk, len))) //FIXME try until success
 			{
 				ev->time.beats = 0.0; //XXX
 				ev->body.type = handle->uris.eteroj_drain;
@@ -932,28 +946,30 @@ _work(LV2_Handle instance,
 
 				varchunk_write_advance(handle->from_disk, len);
 			}
-			else
-				fprintf(stderr, "drain: ringbuffer overflow\n");
+			else if(handle->log)
+				lv2_log_warning(&handle->logger, "drain: ringbuffer overflow");
 
 			break;
 		}
 		case JOB_OPEN_PLAY:
 		{
-			fprintf(stderr, "open for playback: %s\n", handle->path);
+			if(handle->log)
+				lv2_log_note(&handle->logger, "open for playback: %s", handle->path);
 			if(handle->io)
 				fclose(handle->io);
-			if(!(handle->io = fopen(handle->path, "r+")))
-				fprintf(stderr, "failed to open file.\n");
+			if(!(handle->io = fopen(handle->path, "r+")) && handle->log)
+				lv2_log_error(&handle->logger, "failed to open file.");
 
 			break;
 		}
 		case JOB_OPEN_RECORD:
 		{
-			fprintf(stderr, "open for recording: %s\n", handle->path);
+			if(handle->log)
+				lv2_log_note(&handle->logger, "open for recording: %s", handle->path);
 			if(handle->io)
 				fclose(handle->io);
-			if(!(handle->io = fopen(handle->path, "w+")))
-				fprintf(stderr, "failed to open file.\n");
+			if(!(handle->io = fopen(handle->path, "w+")) && handle->log)
+				lv2_log_error(&handle->logger, "failed to open file.");
 
 			break;
 		}

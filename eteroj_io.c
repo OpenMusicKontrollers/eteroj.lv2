@@ -60,10 +60,6 @@ struct _plughandle_t {
 
 		LV2_URID eteroj_stat;
 		LV2_URID eteroj_err;
-
-		LV2_URID log_note;
-		LV2_URID log_error;
-		LV2_URID log_trace;
 	} uris;
 
 	props_t *props;
@@ -80,6 +76,7 @@ struct _plughandle_t {
 	char osc_error [512];
 
 	LV2_Log_Log *log;
+	LV2_Log_Logger logger;
 
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
@@ -130,33 +127,6 @@ _list_insert(list_t *root, list_t *item)
 	item->next = l0->next; // is NULL at end of list
 	l0->next = item;
 	return root;
-}
-
-static void
-lprintf(plughandle_t *handle, LV2_URID type, const char *fmt, ...)
-{
-	if(handle->log)
-	{
-		va_list args;
-		va_start(args, fmt);
-		handle->log->vprintf(handle->log->handle, type, fmt, args);
-		va_end(args);
-	}
-	else if(type != handle->uris.log_trace)
-	{
-		const char *type_str = NULL;
-		if(type == handle->uris.log_note)
-			type_str = "Note";
-		else if(type == handle->uris.log_error)
-			type_str = "Error";
-
-		fprintf(stderr, "[%s]", type_str);
-		va_list args;
-		va_start(args, fmt);
-		vfprintf(stderr, fmt, args);
-		va_end(args);
-		fputc('\n', stderr);
-	}
 }
 
 static LV2_State_Status
@@ -597,8 +567,8 @@ _unroll_bundle(const osc_data_t *buf, size_t size, void *data)
 
 		handle->list = _list_insert(handle->list, l);
 	}
-	else
-		lprintf(handle, handle->uris.log_trace, "message pool overflow");
+	else if(handle->log)
+		lv2_log_trace(&handle->logger, "message pool overflow");
 }
 
 static const osc_unroll_inject_t inject = {
@@ -655,6 +625,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 
 	for(i=0; features[i]; i++)
+	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_LOG__log))
@@ -663,17 +634,18 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 			handle->sched = features[i]->data;
 		else if(!strcmp(features[i]->URI, OSC__schedule))
 			handle->osc_sched = features[i]->data;
+	}
 
 	if(!handle->map)
 	{
-		lprintf(handle, handle->uris.log_error,
+		fprintf(stderr,
 			"%s: Host does not support urid:map\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
 	if(!handle->sched)
 	{
-		lprintf(handle, handle->uris.log_error,
+		fprintf(stderr,	
 			"%s: Host does not support worker:sched\n", descriptor->URI);
 		free(handle);
 		return NULL;
@@ -681,13 +653,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	handle->tlsf = tlsf_create_with_pool(handle->mem, POOL_SIZE);
 
-	handle->uris.log_note = handle->map->map(handle->map->handle,
-		LV2_LOG__Note);
-	handle->uris.log_error = handle->map->map(handle->map->handle,
-		LV2_LOG__Error);
-	handle->uris.log_trace = handle->map->map(handle->map->handle,
-		LV2_LOG__Trace);
-
+	if(handle->log)
+		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	osc_forge_init(&handle->oforge, handle->map);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
@@ -938,11 +905,26 @@ run(LV2_Handle instance, uint32_t nsamples)
 					if(size)
 						varchunk_write_advance(handle->data.to_worker, size);
 				}
+				else if(handle->log)
+					lv2_log_trace(&handle->logger, "output ringbuffer overflow");
 			}
 		}
 	}
 	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
 		handle->needs_flushing = true;
+
+	if(handle->needs_flushing)
+	{
+		LV2_Worker_Status status = handle->sched->schedule_work(
+			handle->sched->handle, sizeof(flush_msg), flush_msg);
+		//TODO check status
+	}
+	else
+	{
+		LV2_Worker_Status status = handle->sched->schedule_work(
+			handle->sched->handle, sizeof(recv_msg), recv_msg);
+		//TODO check status
+	}
 
 	// reschedule scheduled bundles
 	if(handle->osc_sched)
@@ -975,7 +957,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 	{
 		if(l->frames < 0) // late event
 		{
-			lprintf(handle, handle->uris.log_trace, "late event: %li samples", l->frames);
+			if(handle->log)
+				lv2_log_trace(&handle->logger, "late event: %li samples", l->frames);
 			l->frames = 0; // dispatch as early as possible
 		}
 		else if(l->frames >= nsamples) // not scheduled for this period
@@ -1002,19 +985,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 		tlsf_free(handle->tlsf, l0);
 	}
 
-	if(handle->needs_flushing)
-	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
-			handle->sched->handle, sizeof(flush_msg), flush_msg);
-		//TODO check status
-	}
-	else
-	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
-			handle->sched->handle, sizeof(recv_msg), recv_msg);
-		//TODO check status
-	}
-
 	if(handle->status_updated)
 	{
 		props_set(handle->props, forge, nsamples-1, handle->uris.eteroj_stat);
@@ -1025,6 +995,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	if(handle->ref)
 		lv2_atom_forge_pop(forge, &frame);
+	else
+		lv2_atom_sequence_clear(handle->osc_out);
 }
 
 static void

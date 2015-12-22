@@ -59,6 +59,9 @@ struct _plughandle_t {
 	osc_forge_t oforge;
 	LV2_Atom_Forge forge;
 
+	LV2_Log_Log *log;
+	LV2_Log_Logger logger;
+
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
 
@@ -84,8 +87,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = features[i]->data;
-		if(!strcmp(features[i]->URI, LV2_URID__unmap))
+		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
 			handle->unmap = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_LOG__log))
+			handle->log = features[i]->data;
 	}
 
 	if(!handle->map)
@@ -103,6 +108,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
+	if(handle->log)
+		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	osc_forge_init(&handle->oforge, handle->map);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
@@ -177,8 +184,9 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 static inline int
 json_eq(const char *json, jsmntok_t *tok, const char *s)
 {
-	if(tok->type == JSMN_STRING && (int) strlen(s) == tok->end - tok->start &&
-		!strncmp(json + tok->start, s, tok->end - tok->start))
+	if(  (tok->type == JSMN_STRING)
+		&& ((int)strlen(s) == tok->end - tok->start)
+		&& !strncmp(json + tok->start, s, tok->end - tok->start) )
 	{
 		return 0;
 	}
@@ -459,10 +467,8 @@ _message_cb(const char *path, const char *fmt,
 			jsmn_init(&handle->parser);
 			int n_tokens = jsmn_parse(&handle->parser, json, strlen(json),
 				handle->tokens, MAX_TOKENS);
-			if(n_tokens < 1)
-			{
-				fprintf(stderr, "eror parsing JSON: '%s'\n", json);
-			}
+			if( (n_tokens < 1) && handle->log)
+				lv2_log_trace(&handle->logger, "eror parsing JSON: '%s'", json);
 
 			size_t target_len = 0;
 			const char *target = NULL;
@@ -517,8 +523,8 @@ _message_cb(const char *path, const char *fmt,
 
 							varchunk_write_advance(handle->rb, len2);
 						}
-						else
-							fprintf(stderr, "eteroj#query: ringbuffer full\n");
+						else if(handle->log)
+							lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
 					}
 				}
 				else if(!json_eq(json, key, "arguments"))
@@ -619,7 +625,8 @@ _message_cb(const char *path, const char *fmt,
 		const char *msg;
 
 		atom = osc_deforge_message_vararg(oforge, forge, atom, "iss", &id, &destination, &msg);
-		fprintf(stderr, "error: %s (%s)\n", destination, msg);
+		if(handle->log)
+			lv2_log_trace(&handle->logger, "error: %s (%s)", destination, msg);
 	}
 }
 
@@ -730,8 +737,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 						varchunk_write_advance(handle->rb, len2);
 						request_new = true;
 					}
-					else
-						fprintf(stderr, "eteroj#query: ringbuffer full\n");
+					else if(handle->log)
+						lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
 				}
 				else // !handle->uid.patch_wildcard
 				{
@@ -746,8 +753,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 						varchunk_write_advance(handle->rb, len2);
 						request_new = true;
 					}
-					else
-						fprintf(stderr, "eteroj#query: ringbuffer full\n");
+					else if(handle->log)
+						lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
 				}
 			}
 		}
