@@ -189,13 +189,14 @@ struct _props_t {
 	props_impl_t impls [0];
 };
 
-// non-rt-safe
-static inline props_t *
-props_new(const size_t max_nimpls, const char *subject, LV2_URID_Map *map, void *data);
+#define PROPS_T(PROPS, MAX_NIMPLS) \
+	props_t (PROPS); \
+	props_impl_t _impls [(MAX_NIMPLS)];
 
-// non-rt-safe
-static inline void
-props_free(props_t *props);
+// rt-safe
+static inline int
+props_init(props_t *props, const size_t max_nimpls, const char *subject,
+	LV2_URID_Map *map, void *data);
 
 // rt-safe
 static inline LV2_URID
@@ -645,15 +646,12 @@ _props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 	return ref;
 }
 
-static inline props_t *
-props_new(const size_t max_nimpls, const char *subject, LV2_URID_Map *map, void *data)
+static inline int
+props_init(props_t *props, const size_t max_nimpls, const char *subject,
+	LV2_URID_Map *map, void *data)
 {
 	if(!map)
-		return NULL;
-
-	props_t *props = calloc(1, sizeof(props_t) + max_nimpls*sizeof(props_impl_t));
-	if(!props)
-		return NULL;
+		return 0;
 
 	props->nimpls = 0;
 	props->max_nimpls = max_nimpls;
@@ -774,13 +772,7 @@ props_new(const size_t max_nimpls, const char *subject, LV2_URID_Map *map, void 
 	assert(ptr == PROPS_TYPE_N);
 	qsort(props->types, PROPS_TYPE_N, sizeof(props_type_t), _type_sort);
 
-	return props;
-}
-
-static inline void
-props_free(props_t *props)
-{
-	free(props);
+	return 1;
 }
 
 static inline LV2_URID

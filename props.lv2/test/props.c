@@ -24,6 +24,8 @@
 #define PROPS_PREFIX		"http://open-music-kontrollers.ch/lv2/props#"
 #define PROPS_TEST_URI	PROPS_PREFIX"test"
 
+#define MAX_NPROPS 32
+
 typedef struct _plughandle_t plughandle_t;
 
 struct _plughandle_t {
@@ -34,7 +36,7 @@ struct _plughandle_t {
 
 	LV2_URID log_trace;
 
-	props_t *props;
+	PROPS_T(props, MAX_NPROPS);
 
 	struct {
 		int32_t val1;
@@ -198,8 +200,6 @@ static const props_def_t stat6 = {
 	.maximum.s = 256 // strlen
 };
 
-const unsigned max_nprops = 32;
-
 static int
 _log_vprintf(plughandle_t *handle, LV2_URID type, const char *fmt, va_list args)
 {
@@ -269,7 +269,7 @@ _intercept_dyn1(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		handle->dyn.val2 = handle->dyn.val1 * 2;
 
 		if(handle->ref)
-			handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn2);
+			handle->ref = props_set(&handle->props, forge, frames, handle->urid.dyn2);
 	}
 }
 
@@ -286,7 +286,7 @@ _intercept_dyn3(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		handle->dyn.val4 = handle->dyn.val3 * 2;
 
 		if(handle->ref)
-			handle->ref = props_set(handle->props, forge, frames, handle->urid.dyn4);
+			handle->ref = props_set(&handle->props, forge, frames, handle->urid.dyn4);
 	}
 }
 
@@ -303,7 +303,7 @@ _intercept_stat1(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		handle->stat.val2 = handle->stat.val1 * 2;
 
 		if(handle->ref)
-			handle->ref = props_set(handle->props, forge, frames, handle->urid.stat2);
+			handle->ref = props_set(&handle->props, forge, frames, handle->urid.stat2);
 	}
 }
 
@@ -320,7 +320,7 @@ _intercept_stat3(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		handle->stat.val4 = handle->stat.val3 * 2;
 
 		if(handle->ref)
-			handle->ref = props_set(handle->props, forge, frames, handle->urid.stat4);
+			handle->ref = props_set(&handle->props, forge, frames, handle->urid.stat4);
 	}
 }
 
@@ -377,10 +377,9 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->log_trace = handle->map->map(handle->map->handle, LV2_LOG__Trace);
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	handle->props = props_new(max_nprops, descriptor->URI, handle->map, handle);
-	if(!handle->props)
+	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
-		fprintf(stderr, "failed to allocate property structure\n");
+		fprintf(stderr, "failed to initialize property structure\n");
 		free(handle);
 		return NULL;
 	}
@@ -393,31 +392,30 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->dyn.val6 = true;
 	handle->dyn.val7[0] = '\0';
 
-	if(  props_register(handle->props, &dyn1, PROP_EVENT_ALL, _intercept_dyn1, &handle->dyn.val1)
+	if(  props_register(&handle->props, &dyn1, PROP_EVENT_ALL, _intercept_dyn1, &handle->dyn.val1)
 		&& (handle->urid.dyn2 =
-				props_register(handle->props, &dyn2, PROP_EVENT_ALL, _intercept, &handle->dyn.val2))
-		&& props_register(handle->props, &dyn3, PROP_EVENT_ALL, _intercept_dyn3, &handle->dyn.val3)
+				props_register(&handle->props, &dyn2, PROP_EVENT_ALL, _intercept, &handle->dyn.val2))
+		&& props_register(&handle->props, &dyn3, PROP_EVENT_ALL, _intercept_dyn3, &handle->dyn.val3)
 		&& (handle->urid.dyn4 =
-				props_register(handle->props, &dyn4, PROP_EVENT_ALL, _intercept, &handle->dyn.val4))
-		&& props_register(handle->props, &dyn5, PROP_EVENT_ALL, _intercept, &handle->dyn.val5)
-		&& props_register(handle->props, &dyn6, PROP_EVENT_ALL, _intercept, &handle->dyn.val6)
-		&& props_register(handle->props, &dyn7, PROP_EVENT_ALL, _intercept, &handle->dyn.val7)
+				props_register(&handle->props, &dyn4, PROP_EVENT_ALL, _intercept, &handle->dyn.val4))
+		&& props_register(&handle->props, &dyn5, PROP_EVENT_ALL, _intercept, &handle->dyn.val5)
+		&& props_register(&handle->props, &dyn6, PROP_EVENT_ALL, _intercept, &handle->dyn.val6)
+		&& props_register(&handle->props, &dyn7, PROP_EVENT_ALL, _intercept, &handle->dyn.val7)
 
-		&& props_register(handle->props, &stat1, PROP_EVENT_ALL, _intercept_stat1, &handle->stat.val1)
+		&& props_register(&handle->props, &stat1, PROP_EVENT_ALL, _intercept_stat1, &handle->stat.val1)
 		&& (handle->urid.stat2 =
-				props_register(handle->props, &stat2, PROP_EVENT_ALL, _intercept, &handle->stat.val2))
-		&& props_register(handle->props, &stat3, PROP_EVENT_ALL, _intercept_stat3, &handle->stat.val3)
+				props_register(&handle->props, &stat2, PROP_EVENT_ALL, _intercept, &handle->stat.val2))
+		&& props_register(&handle->props, &stat3, PROP_EVENT_ALL, _intercept_stat3, &handle->stat.val3)
 		&& (handle->urid.stat4 =
-				props_register(handle->props, &stat4, PROP_EVENT_ALL, _intercept, &handle->stat.val4))
-		&& props_register(handle->props, &stat5, PROP_EVENT_ALL, _intercept, &handle->stat.val5)
-		&& props_register(handle->props, &stat6, PROP_EVENT_ALL, _intercept_stat6, &handle->stat.val6) )
+				props_register(&handle->props, &stat4, PROP_EVENT_ALL, _intercept, &handle->stat.val4))
+		&& props_register(&handle->props, &stat5, PROP_EVENT_ALL, _intercept, &handle->stat.val5)
+		&& props_register(&handle->props, &stat6, PROP_EVENT_ALL, _intercept_stat6, &handle->stat.val6) )
 	{
-		props_sort(handle->props);
+		props_sort(&handle->props);
 	}
 	else
 	{
 		_log_printf(handle, handle->log_trace, "ERR     : registering");
-		props_free(handle->props);
 		free(handle);
 		return NULL;
 	}
@@ -458,7 +456,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
 		if(handle->ref)
-			props_advance(handle->props, &handle->forge, ev->time.frames, obj, &handle->ref); //TODO handle return
+			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref); //TODO handle return
 	}
 	if(handle->ref)
 		lv2_atom_forge_pop(&handle->forge, &frame);
@@ -471,7 +469,6 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	props_free(handle->props);
 	free(handle);
 }
 
@@ -482,7 +479,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, &handle->forge, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -492,7 +489,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
 }
 
 LV2_State_Interface state_iface = {
