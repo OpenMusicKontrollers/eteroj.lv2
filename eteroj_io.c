@@ -31,6 +31,7 @@
 
 #define POOL_SIZE 0x20000 // 128KB
 #define BUF_SIZE 0x10000
+#define MAX_NPROPS 3
 
 typedef enum _plugstate_t plugstate_t;
 typedef struct _list_t list_t;
@@ -62,7 +63,7 @@ struct _plughandle_t {
 		LV2_URID eteroj_err;
 	} uris;
 
-	props_t *props;
+	PROPS_T(props, MAX_NPROPS);
 	osc_forge_t oforge;
 	LV2_Atom_Forge forge;
 	LV2_Atom_Forge_Ref ref;
@@ -136,7 +137,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, &handle->forge, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -146,7 +147,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
@@ -677,22 +678,20 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->osc_status = STATE_IDLE;
 	strcpy(handle->osc_error, "");
 
-	handle->props = props_new(3, descriptor->URI, handle->map, handle);
-	if(!handle->props)
+	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
 		free(handle);
 		return NULL;
 	}
 
-	if(  props_register(handle->props, &url_def, PROP_EVENT_WRITE, _intercept, &handle->osc_url)
-		&& (handle->uris.eteroj_stat = props_register(handle->props, &status_def, PROP_EVENT_NONE, NULL, &handle->osc_status))
-		&& (handle->uris.eteroj_err = props_register(handle->props, &error_def, PROP_EVENT_NONE, NULL, &handle->osc_error)))
+	if(  props_register(&handle->props, &url_def, PROP_EVENT_WRITE, _intercept, &handle->osc_url)
+		&& (handle->uris.eteroj_stat = props_register(&handle->props, &status_def, PROP_EVENT_NONE, NULL, &handle->osc_status))
+		&& (handle->uris.eteroj_err = props_register(&handle->props, &error_def, PROP_EVENT_NONE, NULL, &handle->osc_error)))
 	{
-		props_sort(handle->props);
+		props_sort(&handle->props);
 	}
 	else
 	{
-		props_free(handle->props);
 		free(handle);
 		return NULL;
 	}
@@ -887,7 +886,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 		if(obj->atom.type == forge->Object)
 		{
-			if(!props_advance(handle->props, &handle->forge, ev->time.frames, obj, &handle->ref))
+			if(!props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref))
 			{
 				size_t reserve = obj->atom.size;
 				if((handle->data.buf = varchunk_write_request(handle->data.to_worker, reserve)))
@@ -987,8 +986,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	if(handle->status_updated)
 	{
-		props_set(handle->props, forge, nsamples-1, handle->uris.eteroj_stat);
-		props_set(handle->props, forge, nsamples-1, handle->uris.eteroj_err);
+		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_stat);
+		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_err);
 
 		handle->status_updated = false;
 	}
@@ -1021,8 +1020,6 @@ cleanup(LV2_Handle instance)
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 
-	if(handle->props)
-		props_free(handle->props);
 	if(handle)
 		free(handle);
 }

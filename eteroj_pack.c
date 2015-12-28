@@ -24,6 +24,7 @@
 #include <props.h>
 
 #define DEFAULT_PACK_PATH "/midi"
+#define MAX_NPROPS 1
 
 typedef struct _plughandle_t plughandle_t;
 
@@ -36,7 +37,7 @@ struct _plughandle_t {
 	const LV2_Atom_Sequence *midi_in;
 	LV2_Atom_Sequence *osc_out;
 
-	props_t *props;
+	PROPS_T(props, MAX_NPROPS);
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
 
@@ -76,15 +77,14 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 	
 	strcpy(handle->pack_path, DEFAULT_PACK_PATH);
 
-	handle->props = props_new(1, descriptor->URI, handle->map, handle);
-	if(!handle->props)
+	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
 		free(handle);
 		return NULL;
 	}
 
-	props_register(handle->props, &pack_path_def, PROP_EVENT_NONE, NULL, &handle->pack_path);
-	props_sort(handle->props);
+	props_register(&handle->props, &pack_path_def, PROP_EVENT_NONE, NULL, &handle->pack_path);
+	props_sort(&handle->props);
 
 	return handle;
 }
@@ -123,7 +123,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		if(  !props_advance(handle->props, &handle->forge, ev->time.frames, obj, &ref)
+		if(  !props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &ref)
 			&& (obj->atom.type == handle->uris.midi_MidiEvent) )
 		{
 			//TODO handle SysEx
@@ -150,8 +150,6 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	if(handle->props)
-		props_free(handle->props);
 	if(handle)
 		free(handle);
 }
@@ -163,7 +161,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, &handle->forge, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -173,7 +171,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {

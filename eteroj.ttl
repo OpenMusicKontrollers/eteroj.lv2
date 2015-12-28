@@ -119,9 +119,10 @@ eteroj:io
 	] ;
 
 	# parameters
-	patch:writable eteroj:url ;
-	patch:readable eteroj:status ;
-	patch:readable eteroj:error ;
+	patch:writable
+		eteroj:url ,
+		eteroj:status ,
+		eteroj:error ;
 
 	# default state
 	state:state [

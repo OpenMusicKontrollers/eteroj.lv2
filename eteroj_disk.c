@@ -28,6 +28,7 @@
 
 #define BUF_SIZE 0x10000
 #define DEFAULT_FILE_NAME "seq.osc"
+#define MAX_NPROPS 2
 
 typedef enum _jobtype_t jobtype_t;
 typedef struct _job_t job_t;
@@ -60,7 +61,7 @@ struct _plughandle_t {
 	timely_t timely;
 	LV2_Worker_Schedule *sched;
 
-	props_t *props;
+	PROPS_T(props, MAX_NPROPS);
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
@@ -635,21 +636,19 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->to_disk = varchunk_new(BUF_SIZE);
 	handle->from_disk = varchunk_new(BUF_SIZE);
 
-	handle->props = props_new(2, descriptor->URI, handle->map, handle);
-	if(!handle->props)
+	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
 		free(handle);
 		return NULL;
 	}
 
-	if(  props_register(handle->props, &record_def, PROP_EVENT_WRITE, _intercept, &handle->record)
-		&& props_register(handle->props, &path_def, PROP_EVENT_WRITE, _intercept, &handle->path))
+	if(  props_register(&handle->props, &record_def, PROP_EVENT_WRITE, _intercept, &handle->record)
+		&& props_register(&handle->props, &path_def, PROP_EVENT_WRITE, _intercept, &handle->path))
 	{
-		props_sort(handle->props);
+		props_sort(&handle->props);
 	}
 	else
 	{
-		props_free(handle->props);
 		free(handle);
 		return NULL;
 	}
@@ -706,7 +705,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 		const int time_event = timely_advance(&handle->timely, obj, last_t, ev->time.frames);
 		if(!time_event)
-			props_advance(handle->props, &handle->forge, ev->time.frames, obj, &ref);
+			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &ref);
 		handle->beats_upper = _beats(&handle->timely);
 
 		if(handle->record && !time_event && handle->rolling)
@@ -758,9 +757,6 @@ cleanup(LV2_Handle instance)
 	if(handle->from_disk)
 		varchunk_free(handle->from_disk);
 
-	if(handle->props)
-		props_free(handle->props);
-
 	if(handle->io)
 		fclose(handle->io);
 
@@ -774,7 +770,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, &handle->forge, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -784,7 +780,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
