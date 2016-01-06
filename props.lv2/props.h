@@ -147,11 +147,13 @@ struct _props_t {
 
 		LV2_URID patch_get;
 		LV2_URID patch_set;
+		LV2_URID patch_put;
 		LV2_URID patch_patch;
 		LV2_URID patch_wildcard;
 		LV2_URID patch_add;
 		LV2_URID patch_remove;
 		LV2_URID patch_subject;
+		LV2_URID patch_body;
 		LV2_URID patch_property;
 		LV2_URID patch_value;
 		LV2_URID patch_writable;
@@ -662,11 +664,13 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	
 	props->urid.patch_get = map->map(map->handle, LV2_PATCH__Get);
 	props->urid.patch_set = map->map(map->handle, LV2_PATCH__Set);
+	props->urid.patch_put = map->map(map->handle, LV2_PATCH__Put);
 	props->urid.patch_patch = map->map(map->handle, LV2_PATCH__Patch);
 	props->urid.patch_wildcard = map->map(map->handle, LV2_PATCH__wildcard);
 	props->urid.patch_add = map->map(map->handle, LV2_PATCH__add);
 	props->urid.patch_remove = map->map(map->handle, LV2_PATCH__remove);
 	props->urid.patch_subject = map->map(map->handle, LV2_PATCH__subject);
+	props->urid.patch_body = map->map(map->handle, LV2_PATCH__body);
 	props->urid.patch_property = map->map(map->handle, LV2_PATCH__property);
 	props->urid.patch_value = map->map(map->handle, LV2_PATCH__value);
 	props->urid.patch_writable = map->map(map->handle, LV2_PATCH__writable);
@@ -834,10 +838,14 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		lv2_atom_object_query(obj, q);
 
 		// check for a matching optional subject
-		if( (subject && props->urid.subject) && (subject->body != props->urid.subject) )
+		if(  (subject && props->urid.subject)
+			&& ( (subject->atom.type != props->urid.atom_urid)
+				|| (subject->body != props->urid.subject) ) )
+		{
 			return 0;
+		}
 
-		if(!property || (property->body == props->urid.patch_wildcard) )
+		if(!property)
 		{
 			if(props->nimpls)
 				*ref = 1; // needed to get loop started
@@ -860,7 +868,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			}
 			return 1;
 		}
-		else // !wildcard
+		else if(property->atom.type == props->urid.atom_urid)
 		{
 			props_impl_t *impl = _props_impl_search(props, property->body);
 			if(impl)
@@ -886,12 +894,18 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		};
 		lv2_atom_object_query(obj, q);
 
-		if(!property || !value)
+		if(!property || (property->atom.type != props->urid.atom_urid) || !value)
+		{
 			return 0;
+		}
 
 		// check for a matching optional subject
-		if( (subject && props->urid.subject) && (subject->body != props->urid.subject) )
+		if(  (subject && props->urid.subject)
+			&& ( (subject->atom.type != props->urid.atom_urid)
+				|| (subject->body != props->urid.subject) ) )
+		{
 			return 0;
+		}
 
 		props_impl_t *impl = _props_impl_search(props, property->body);
 		if(impl && (impl->access == props->urid.patch_writable) )
@@ -901,6 +915,46 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 				impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			return 1;
 		}
+	}
+	else if(obj->body.otype == props->urid.patch_put)
+	{
+		const LV2_Atom_URID *subject = NULL;
+		const LV2_Atom_Object *body = NULL;
+
+		LV2_Atom_Object_Query q [] = {
+			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
+			{ props->urid.patch_body, (const LV2_Atom **)&body },
+			LV2_ATOM_OBJECT_QUERY_END
+		};
+		lv2_atom_object_query(obj, q);
+
+		if(!body || !lv2_atom_forge_is_object_type(forge, body->atom.type))
+		{
+			return 0;
+		}
+
+		// check for a matching optional subject
+		if(  (subject && props->urid.subject)
+			&& ( (subject->atom.type != props->urid.atom_urid)
+				|| (subject->body != props->urid.subject) ) )
+		{
+			return 0;
+		}
+
+		LV2_ATOM_OBJECT_FOREACH(body, prop)
+		{
+			const LV2_URID property = prop->key;
+			const LV2_Atom *value = &prop->value;
+
+			props_impl_t *impl = _props_impl_search(props, property);
+			if(impl && (impl->access == props->urid.patch_writable) )
+			{
+				_props_set(props, forge, impl, value->type, LV2_ATOM_BODY_CONST(value));
+				if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
+					impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
+			}
+		}
+		return 1;
 	}
 
 	return 0; // did not handle a patch event
@@ -921,6 +975,9 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features)
 {
 	const LV2_State_Map_Path *map_path = NULL;
+
+	// set POD flag if not already set by host
+	flags |= LV2_STATE_IS_POD;
 
 	for(unsigned i = 0; features[i]; i++)
 	{
