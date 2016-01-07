@@ -718,13 +718,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 				};
 				lv2_atom_object_query(obj, q);
 
-				if(!property)
-					continue;
-
 				if(subject && (subject->body != handle->urid.subject))
 					continue; // subject not matching
 
-				if(property->body == handle->urid.patch_wildcard)
+				if(!property)
 				{
 					const char *destination = "/!";
 
@@ -740,7 +737,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 					else if(handle->log)
 						lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
 				}
-				else // !handle->uid.patch_wildcard
+				else
 				{
 					const char *uri = handle->unmap->unmap(handle->unmap->handle, property->body);
 
