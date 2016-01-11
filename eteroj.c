@@ -39,8 +39,6 @@ lv2_descriptor(uint32_t index)
 			return &eteroj_decloak;
 		case 5:
 			return &eteroj_pack;
-		case 6:
-			return &eteroj_unpack;
 		default:
 			return NULL;
 	}

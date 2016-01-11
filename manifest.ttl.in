@@ -59,16 +59,8 @@ eteroj:decloak
 	lv2:binary <eteroj@LIB_EXT@> ;
 	rdfs:seeAlso <eteroj.ttl> .
 
-# Eteroj MIDI Pack 
+# Eteroj MIDI (Un)Pack 
 eteroj:pack
-	a lv2:Plugin ;
-	lv2:minorVersion @ETEROJ_MINOR_VERSION@ ;
-	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;
-	lv2:binary <eteroj@LIB_EXT@> ;
-	rdfs:seeAlso <eteroj.ttl> .
-
-# Eteroj MIDI Unpack
-eteroj:unpack
 	a lv2:Plugin ;
 	lv2:minorVersion @ETEROJ_MINOR_VERSION@ ;
 	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;
