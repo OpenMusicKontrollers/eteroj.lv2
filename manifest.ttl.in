@@ -43,16 +43,8 @@ eteroj:query
 	lv2:binary <eteroj@LIB_EXT@> ;
 	rdfs:seeAlso <eteroj.ttl> .
 
-# Eteroj MIDI Cloak 
+# Eteroj MIDI (De)Cloak 
 eteroj:cloak
-	a lv2:Plugin ;
-	lv2:minorVersion @ETEROJ_MINOR_VERSION@ ;
-	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;
-	lv2:binary <eteroj@LIB_EXT@> ;
-	rdfs:seeAlso <eteroj.ttl> .
-
-# Eteroj MIDI Decloak
-eteroj:decloak
 	a lv2:Plugin ;
 	lv2:minorVersion @ETEROJ_MINOR_VERSION@ ;
 	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;

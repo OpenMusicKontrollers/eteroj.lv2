@@ -28,19 +28,17 @@ typedef struct _plughandle_t plughandle_t;
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
-	LV2_URID_Unmap *unmap;
 	struct {
 		LV2_URID midi_MidiEvent;
 	} uris;
 
-	struct {
-		int64_t frames;
-		osc_data_t buf [BUF_SIZE];
-		osc_data_t *end;
-	} data;
+	int64_t frames;
+	LV2_Atom_Forge_Ref ref;
+	osc_data_t buf [BUF_SIZE];
+	osc_data_t *end;
 
-	const LV2_Atom_Sequence *osc_in;
-	LV2_Atom_Sequence *midi_out;
+	const LV2_Atom_Sequence *event_in;
+	LV2_Atom_Sequence *event_out;
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
 };
@@ -54,10 +52,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 
 	for(unsigned i=0; features[i]; i++)
+	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = (LV2_URID_Map *)features[i]->data;
-		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
-			handle->unmap = (LV2_URID_Unmap *)features[i]->data;
+	}
 
 	if(!handle->map)
 	{
@@ -70,7 +68,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	osc_forge_init(&handle->oforge, handle->map);
 
-	handle->data.end = handle->data.buf + BUF_SIZE;
+	handle->end = handle->buf + BUF_SIZE;
 
 	return handle;
 }
@@ -83,10 +81,10 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 	switch(port)
 	{
 		case 0:
-			handle->osc_in = (const LV2_Atom_Sequence *)data;
+			handle->event_in = (const LV2_Atom_Sequence *)data;
 			break;
 		case 1:
-			handle->midi_out = (LV2_Atom_Sequence *)data;
+			handle->event_out = (LV2_Atom_Sequence *)data;
 			break;
 		default:
 			break;
@@ -123,6 +121,297 @@ _cloaked_size(uint32_t size)
 	}
 
 	return cloaked_size;
+}
+
+static inline void
+_decloak_chunk(volatile uint8_t *to, volatile const uint8_t *from,
+	const uint8_t *end, uint32_t size)
+{
+	while(size && (from < end))
+	{
+		volatile const uint8_t loc = from[0];
+		if(loc & 0x40) // decode 6 bytes
+		{
+			to[0] = from[1] | ( (loc << 7) & 0x80);
+			to[1] = from[2] | ( (loc << 6) & 0x80);
+			to[2] = from[3] | ( (loc << 5) & 0x80);
+			to[3] = from[4] | ( (loc << 4) & 0x80);
+			to[4] = from[5] | ( (loc << 3) & 0x80);
+			to[5] = from[6] | ( (loc << 2) & 0x80);
+
+			from += 7;
+			to += 6;
+			size -= 7;
+		}
+		else // decode 4 bytes
+		{
+			to[0] = from[1] | ( (loc << 7) & 0x80);
+			to[1] = from[2] | ( (loc << 6) & 0x80);
+			to[2] = from[3] | ( (loc << 5) & 0x80);
+			to[3] = from[4] | ( (loc << 4) & 0x80);
+
+			from += 5;
+			to += 4;
+			size -= 5;
+		}
+	}
+}
+
+// inline unpacking of OSC from MIDI sysex
+static uint32_t
+_osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
+{
+	uint32_t count = 0;
+
+	volatile const uint8_t *from = src;
+	const uint8_t *end = src + size;
+	volatile uint8_t *to = dst;
+
+	from++; // skip SYSEX_START
+
+	uint32_t path_len = osc_strlen((const char *)from);
+	count += path_len;
+
+	if(count > size-6) // SYSEX_START + MIN(fmt_len) + SYSEX_END
+		return 0;
+
+	const uint8_t *fmt = (const uint8_t *)(from + path_len);
+	uint32_t fmt_len = osc_strlen((const char *)fmt);
+	count += fmt_len;
+
+	if(count > size-2) // SYSEX_START + SYSEX_END
+		return 0;
+	
+	memmove((uint8_t *)to, (const uint8_t *)from, count);
+	to += count;
+	from += count;
+
+	count = 0;
+	for(const uint8_t *type=fmt; *type; type++)
+	{
+		switch(*type)
+		{
+			case 'i':
+			case 'f':
+			case 'm':
+				count += 4;
+				break;
+
+			case 'h':
+			case 'd':
+			case 't':
+				count += 8;
+				break;
+
+			case 's':
+			case 'S':
+				if(count)
+				{
+					uint32_t cloaked_count = _cloaked_size(count);
+
+					_decloak_chunk(to, from, end, cloaked_count);
+
+					from += cloaked_count;
+					to += count;
+				}
+
+				{
+					count = osc_strlen((const char *)from);
+
+					memmove((uint8_t *)to, (const uint8_t *)from, count);
+
+					from += count;
+					to += count;
+
+					count = 0;
+				}
+				break;
+
+			case 'b':
+				if(count)
+				{
+					uint32_t cloaked_count = _cloaked_size(count);
+
+					_decloak_chunk(to, from, end, cloaked_count);
+
+					from += cloaked_count;
+					to += count;
+				}
+
+				{
+					union {
+						int32_t i;
+						uint8_t b [6];
+					} blobsize;
+					_decloak_chunk(blobsize.b, from, end, from[0] & 0x40 ? 7 : 5);
+					count = osc_bloblen(blobsize.b);
+
+					uint32_t cloaked_count = _cloaked_size(count);
+
+					_decloak_chunk(to, from, end, cloaked_count);
+
+					from += cloaked_count;
+					to += count;
+
+					count = 0;
+				}
+				break;
+		}
+	}
+
+	if(count)
+	{
+		uint32_t cloaked_count = _cloaked_size(count);
+
+		_decloak_chunk(to, from, end, cloaked_count);
+
+		from += cloaked_count;
+		to += count;
+	}
+
+	from++; // skip SYSEX_END
+
+	if(from == end)
+		return to - dst;
+
+	return 0;
+}
+
+// rt
+static int
+_message(osc_time_t timestamp, const char *path, const char *fmt,
+	const osc_data_t *buf, size_t size, void *data)
+{
+	plughandle_t *handle = data;
+	LV2_Atom_Forge *forge = &handle->forge;
+	LV2_Atom_Forge_Frame frame [2];
+	LV2_Atom_Forge_Ref ref = handle->ref;
+
+	const osc_data_t *ptr = buf;
+
+	if(ref)
+		ref = osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
+
+	for(const char *type = fmt; *type; type++)
+		switch(*type)
+		{
+			case 'i':
+			{
+				int32_t i;
+				ptr = osc_get_int32(ptr, &i);
+				if(ref)
+					ref = osc_forge_int32(&handle->oforge, forge, i);
+				break;
+			}
+			case 'f':
+			{
+				float f;
+				ptr = osc_get_float(ptr, &f);
+				if(ref)
+					ref = osc_forge_float(&handle->oforge, forge, f);
+				break;
+			}
+			case 's':
+			case 'S':
+			{
+				const char *s;
+				ptr = osc_get_string(ptr, &s);
+				if(ref)
+					ref = osc_forge_string(&handle->oforge, forge, s);
+				break;
+			}
+			case 'b':
+			{
+				osc_blob_t b;
+				ptr = osc_get_blob(ptr, &b);
+				if(ref)
+					ref = osc_forge_blob(&handle->oforge, forge, b.size, b.payload);
+				break;
+			}
+
+			case 'h':
+			{
+				int64_t h;
+				ptr = osc_get_int64(ptr, &h);
+				if(ref)
+					ref = osc_forge_int64(&handle->oforge, forge, h);
+				break;
+			}
+			case 'd':
+			{
+				double d;
+				ptr = osc_get_double(ptr, &d);
+				if(ref)
+					ref = osc_forge_double(&handle->oforge, forge, d);
+				break;
+			}
+			case 't':
+			{
+				uint64_t t;
+				ptr = osc_get_timetag(ptr, &t);
+				if(ref)
+					ref = osc_forge_timestamp(&handle->oforge, forge, t);
+				break;
+			}
+
+			case 'T':
+			case 'F':
+			case 'N':
+			case 'I':
+			{
+				break;
+			}
+
+			case 'c':
+			{
+				char c;
+				ptr = osc_get_char(ptr, &c);
+				if(ref)
+					ref = osc_forge_char(&handle->oforge, forge, c);
+				break;
+			}
+			case 'm':
+			{
+				const uint8_t *m;
+				ptr = osc_get_midi(ptr, &m);
+				if(ref)
+					ref = osc_forge_midi(&handle->oforge, forge, 3, m + 1); // skip port byte
+				break;
+			}
+		}
+
+	if(ref)
+		osc_forge_message_pop(&handle->oforge, forge, frame);
+
+	handle->ref = ref;
+
+	return 1;
+}
+
+static const osc_method_t methods [] = {
+	{NULL, NULL, _message},
+
+	{NULL, NULL, NULL}
+};
+
+static void
+_decloak_event(plughandle_t *handle, int64_t frames, const uint8_t *arg, uint32_t size)
+{
+	LV2_Atom_Forge *forge = &handle->forge;
+
+	if(size)
+	{
+		memcpy(handle->buf, arg, size);
+
+		size = _osc_sysex2raw(handle->buf, handle->buf, size);
+		if(size && osc_check_packet(handle->buf, size))
+		{
+			if(handle->ref)
+				handle->ref = lv2_atom_forge_frame_time(forge, frames);
+			if(handle->ref)
+				osc_dispatch_method(handle->buf, size, methods, NULL, NULL, handle);
+		}
+	}
 }
 
 // inline packing of OSC into MIDI sysex
@@ -318,8 +607,8 @@ _cloak_message(const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	osc_data_t *ptr = handle->data.buf;
-	const osc_data_t *end = handle->data.end;
+	osc_data_t *ptr = handle->buf;
+	const osc_data_t *end = handle->end;
 
 	ptr = osc_set_path(ptr, end, path);
 	ptr = osc_set_fmt(ptr, end, fmt);
@@ -397,20 +686,24 @@ _cloak_message(const char *path, const char *fmt,
 		}
 	}
 
-	uint32_t size = ptr - handle->data.buf;
+	uint32_t size = ptr - handle->buf;
 
-	if(size && osc_check_packet(handle->data.buf, size))
+	if(size && osc_check_packet(handle->buf, size))
 	{
-		size = _osc_raw2sysex(handle->data.buf, handle->data.buf, size);
+		size = _osc_raw2sysex(handle->buf, handle->buf, size);
 
 		if(size)
 		{
 			LV2_Atom_Forge *forge = &handle->forge;
 
-			lv2_atom_forge_frame_time(forge, handle->data.frames);
-			lv2_atom_forge_atom(forge, size, handle->uris.midi_MidiEvent);
-			lv2_atom_forge_raw(forge, handle->data.buf, size);
-			lv2_atom_forge_pad(forge, size);
+			if(handle->ref)
+				handle->ref = lv2_atom_forge_frame_time(forge, handle->frames);
+			if(handle->ref)
+				handle->ref = lv2_atom_forge_atom(forge, size, handle->uris.midi_MidiEvent);
+			if(handle->ref)
+				handle->ref = lv2_atom_forge_raw(forge, handle->buf, size);
+			if(handle->ref)
+				lv2_atom_forge_pad(forge, size);
 		}
 	}
 }
@@ -421,21 +714,37 @@ run(LV2_Handle instance, uint32_t nsamples)
 	plughandle_t *handle = (plughandle_t *)instance;
 
 	// prepare osc atom forge
-	const uint32_t capacity = handle->midi_out->atom.size;
+	const uint32_t capacity = handle->event_out->atom.size;
 	LV2_Atom_Forge *forge = &handle->forge;
-	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->midi_out, capacity);
+	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->event_out, capacity);
 	LV2_Atom_Forge_Frame frame;
-	lv2_atom_forge_sequence_head(forge, &frame, 0);
+	handle->ref = lv2_atom_forge_sequence_head(forge, &frame, 0);
 	
-	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
+	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
-		handle->data.frames = ev->time.frames;
+		handle->frames = ev->time.frames;
 
-		osc_atom_event_unroll(&handle->oforge, obj, NULL, NULL, _cloak_message, handle);
+		if(obj->atom.type == handle->uris.midi_MidiEvent)
+		{
+			const size_t size = obj->atom.size;
+			const uint8_t *buf = LV2_ATOM_BODY_CONST(&obj->atom);
+
+			if( (buf[0] == SYSEX_START) && (buf[size-1] == SYSEX_END) )
+			{
+				_decloak_event(handle, handle->frames, buf, size);
+			}
+		}
+		else
+		{
+			osc_atom_event_unroll(&handle->oforge, obj, NULL, NULL, _cloak_message, handle);
+		}
 	}
 
-	lv2_atom_forge_pop(forge, &frame);
+	if(handle->ref)
+		lv2_atom_forge_pop(forge, &frame);
+	else
+		lv2_atom_sequence_clear(handle->event_out);
 }
 
 static void

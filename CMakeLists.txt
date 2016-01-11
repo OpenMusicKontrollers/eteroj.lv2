@@ -46,7 +46,6 @@ add_library(eteroj MODULE
 	eteroj_disk.c
 	eteroj_query.c
 	eteroj_cloak.c
-	eteroj_decloak.c
 	eteroj_pack.c
 	tlsf-3.0/tlsf.c
 	jsmn/jsmn.c)
