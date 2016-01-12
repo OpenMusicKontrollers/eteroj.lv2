@@ -23,6 +23,7 @@ extern "C" {
 #endif
 
 #include <stdlib.h>
+#include <stdatomic.h>
 
 #include <lv2/lv2plug.in/ns/lv2core/lv2.h>
 #include <lv2/lv2plug.in/ns/ext/urid/urid.h>
@@ -139,6 +140,7 @@ struct _props_impl_t {
 	props_event_t event_mask;
 	props_event_cb_t event_cb;
 	void *value;
+	atomic_flag lock;
 };
 
 struct _props_t {
@@ -186,6 +188,7 @@ struct _props_t {
 
 	props_type_t types [PROPS_TYPE_N];
 
+	unsigned max_size;
 	unsigned max_nimpls;
 	unsigned nimpls;
 	props_impl_t impls [0];
@@ -215,6 +218,10 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	const LV2_Atom_Object *obj, LV2_Atom_Forge_Ref *ref);
 
 // rt-safe
+static inline void
+props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void *value);
+
+// rt-safe
 static inline LV2_Atom_Forge_Ref
 props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property);
 
@@ -230,6 +237,21 @@ props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function
 /*****************************************************************************
  * API END
  *****************************************************************************/
+
+static inline void
+_impl_spin_lock(props_impl_t *impl)
+{
+	while(atomic_flag_test_and_set_explicit(&impl->lock, memory_order_acquire))
+	{
+		// spin
+	}
+}
+
+static inline void
+_impl_spin_unlock(props_impl_t *impl)
+{
+	atomic_flag_clear_explicit(&impl->lock, memory_order_release);
+}
 
 static LV2_Atom_Forge_Ref
 _props_int_get_cb(LV2_Atom_Forge *forge, const void *value)
@@ -394,7 +416,7 @@ _signum(LV2_URID urid1, LV2_URID urid2)
 		return -1;
 	else if(urid1 > urid2)
 		return 1;
-	
+
 	return 0;
 }
 
@@ -475,9 +497,13 @@ _props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 }
 
 static inline void
-_props_set(props_t *props, LV2_Atom_Forge *forge, props_impl_t *impl, LV2_URID type, const void *value)
+_props_set(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
 {
+	_impl_spin_lock(impl);
+
 	impl->type->set_cb(props, impl->value, type, value);
+
+	_impl_spin_unlock(impl);
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -659,9 +685,9 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	props->max_nimpls = max_nimpls;
 	props->map = map;
 	props->data = data;
-	
+
 	props->urid.subject = subject ? map->map(map->handle, subject) : 0;
-	
+
 	props->urid.patch_get = map->map(map->handle, LV2_PATCH__Get);
 	props->urid.patch_set = map->map(map->handle, LV2_PATCH__Set);
 	props->urid.patch_put = map->map(map->handle, LV2_PATCH__Put);
@@ -675,7 +701,7 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	props->urid.patch_value = map->map(map->handle, LV2_PATCH__value);
 	props->urid.patch_writable = map->map(map->handle, LV2_PATCH__writable);
 	props->urid.patch_readable = map->map(map->handle, LV2_PATCH__readable);
-	
+
 	props->urid.rdf_value = map->map(map->handle,
 		"http://www.w3.org/1999/02/22-rdf-syntax-ns#value");
 
@@ -806,6 +832,13 @@ props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
 	impl->event_mask = event_mask;
 	impl->event_cb = event_cb;
 	impl->value = value;
+	atomic_flag_clear_explicit(&impl->lock, memory_order_relaxed);
+
+	// update maximal value size
+	if(props_type->size && (props_type->size > props->max_size) )
+		props->max_size = props_type->size;
+	else if(def->maximum.s && (def->maximum.s > props->max_size) )
+		props->max_size = def->maximum.s;
 
 	//TODO register?
 
@@ -849,7 +882,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		{
 			if(props->nimpls)
 				*ref = 1; // needed to get loop started
-			for(unsigned i = 0 ; i < props->nimpls; i++)
+			for(unsigned i = 0; i < props->nimpls; i++)
 			{
 				props_impl_t *impl = &props->impls[i];
 
@@ -871,6 +904,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		else if(property->atom.type == props->urid.atom_urid)
 		{
 			props_impl_t *impl = _props_impl_search(props, property->body);
+
 			if(impl)
 			{
 				*ref = _props_get(props, forge, frames, impl);
@@ -910,7 +944,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		props_impl_t *impl = _props_impl_search(props, property->body);
 		if(impl && (impl->access == props->urid.patch_writable) )
 		{
-			_props_set(props, forge, impl, value->type, LV2_ATOM_BODY_CONST(value));
+			_props_set(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
 			if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
 				impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			return 1;
@@ -949,7 +983,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			props_impl_t *impl = _props_impl_search(props, property);
 			if(impl && (impl->access == props->urid.patch_writable) )
 			{
-				_props_set(props, forge, impl, value->type, LV2_ATOM_BODY_CONST(value));
+				_props_set(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
 				if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
 					impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			}
@@ -960,10 +994,20 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	return 0; // did not handle a patch event
 }
 
+static inline void
+props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void *value)
+{
+	props_impl_t *impl = _props_impl_search(props, property);
+
+	if(impl)
+		_props_set(props, impl, type, value);
+}
+
 static inline LV2_Atom_Forge_Ref
 props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property)
 {
 	props_impl_t *impl = _props_impl_search(props, property);
+
 	if(impl)
 		return _props_get(props, forge, frames, impl);
 
@@ -985,36 +1029,49 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 			map_path = features[i]->data;
 	}
 
-	for(unsigned i = 0; i < props->nimpls; i++)
+	void *value = malloc(props->max_size); // create memory to store widest value
+	if(value)
 	{
-		props_impl_t *impl = &props->impls[i];
-
-		if(impl->access == props->urid.patch_readable)
-			continue; // skip read-only, as it makes no sense to restore them
-
-		uint32_t size = impl->type->size_cb
-			? impl->type->size_cb(impl->value)
-			: impl->type->size;
-
-		if( map_path && (impl->type->urid == forge->Path) )
+		for(unsigned i = 0; i < props->nimpls; i++)
 		{
-			const char *path = strstr(impl->value, "file://")
-				? impl->value + 7 // skip "file://"
-				: impl->value;
-			char *abstract = map_path->abstract_path(map_path->handle, path);
-			if(abstract)
+			props_impl_t *impl = &props->impls[i];
+
+			if(impl->access == props->urid.patch_readable)
+				continue; // skip read-only, as it makes no sense to restore them
+
+			// create lockfree copy of value, store() may well be blocking
+			_impl_spin_lock(impl);
+
+			uint32_t size = impl->type->size_cb
+				? impl->type->size_cb(impl->value)
+				: impl->type->size;
+
+			memcpy(value, impl->value, size);
+
+			_impl_spin_unlock(impl);
+
+			if( map_path && (impl->type->urid == forge->Path) )
 			{
-				store(state, impl->property, abstract, strlen(abstract) + 1, impl->type->urid, flags);
-				free(abstract);
+				const char *path = strstr(value, "file://")
+					? value + 7 // skip "file://"
+					: value;
+				char *abstract = map_path->abstract_path(map_path->handle, path);
+				if(abstract)
+				{
+					store(state, impl->property, abstract, strlen(abstract) + 1, impl->type->urid, flags);
+					free(abstract);
+				}
 			}
-		}
-		else // !Path
-		{
-			store(state, impl->property, impl->value, size, impl->type->urid, flags);
+			else // !Path
+			{
+				store(state, impl->property, value, size, impl->type->urid, flags);
+			}
+
+			if(impl->event_cb && (impl->event_mask & PROP_EVENT_SAVE) )
+				impl->event_cb(props->data, forge, 0, PROP_EVENT_SAVE, impl);
 		}
 
-		if(impl->event_cb && (impl->event_mask & PROP_EVENT_SAVE) )
-			impl->event_cb(props->data, forge, 0, PROP_EVENT_SAVE, impl);
+		free(value);
 	}
 
 	return LV2_STATE_SUCCESS;
@@ -1051,13 +1108,13 @@ props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function
 				char *absolute = map_path->absolute_path(map_path->handle, value);
 				if(absolute)
 				{
-					_props_set(props, forge, impl, type, absolute);
+					_props_set(props, impl, type, absolute);
 					free(absolute);
 				}
 			}
 			else // !Path
 			{
-				_props_set(props, forge, impl, type, value);
+				_props_set(props, impl, type, value);
 			}
 
 			if(impl->event_cb && (impl->event_mask & PROP_EVENT_RESTORE) )
