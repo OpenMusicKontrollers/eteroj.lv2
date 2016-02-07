@@ -522,8 +522,7 @@ _beats(timely_t *timely)
 {
 	double beats = TIMELY_BAR(timely)
 		* TIMELY_BEATS_PER_BAR(timely)
-		+ TIMELY_BAR_BEAT(timely)
-		+ timely->offset.beat / TIMELY_FRAMES_PER_BEAT(timely);
+		+ TIMELY_BAR_BEAT(timely);
 
 	return beats;
 }
