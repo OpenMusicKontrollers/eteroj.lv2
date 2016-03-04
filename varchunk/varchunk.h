@@ -68,13 +68,14 @@ typedef struct _varchunk_elmnt_t varchunk_elmnt_t;
 
 struct _varchunk_elmnt_t {
 	uint32_t size;
-	uint32_t gap;	
+	uint32_t gap;
 };
 
 struct _varchunk_t {
   size_t size;
   size_t mask;
 	size_t rsvd;
+	size_t gapd;
 
   _Atomic size_t head;
   _Atomic size_t tail;
@@ -95,13 +96,13 @@ static inline varchunk_t *
 varchunk_new(size_t minimum)
 {
 	varchunk_t *varchunk;
-	
+
 	if(!(varchunk = calloc(1, sizeof(varchunk_t))))
 		return NULL;
 
 	atomic_init(&varchunk->head, 0);
 	atomic_init(&varchunk->tail, 0);
-	
+
 	varchunk->size = 1;
 	while(varchunk->size < minimum)
 		varchunk->size <<= 1; // assure size to be a power of 2
@@ -118,7 +119,7 @@ varchunk_new(size_t minimum)
 		free(varchunk);
 		return NULL;
 	}
-	
+
 	return varchunk;
 }
 
@@ -142,7 +143,7 @@ static inline void
 _varchunk_write_advance_raw(varchunk_t *varchunk, size_t head, size_t written)
 {
 	// only producer is allowed to advance write head
-	size_t new_head = (head + written) & varchunk->mask;
+	const size_t new_head = (head + written) & varchunk->mask;
 	atomic_store_explicit(&varchunk->head, new_head, memory_order_release);
 }
 
@@ -152,14 +153,15 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 	if(minimum == 0)
 	{
 		varchunk->rsvd = 0;
+		varchunk->gapd = 0;
 		return NULL;
 	}
 
 	size_t space; // size of writable buffer
 	size_t end; // virtual end of writable buffer
-	size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed); // read head
-	size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_acquire); // read tail (consumer modifies it any time)
-	size_t padded = 2*sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(minimum);
+	const size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed); // read head
+	const size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_acquire); // read tail (consumer modifies it any time)
+	const size_t padded = 2*sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(minimum);
 
 	// calculate writable space
 	if(head > tail)
@@ -174,34 +176,31 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 	{
 		// get first part of available buffer
 		void *buf1 = varchunk->buf + head;
-		size_t len1 = varchunk->size - head;
+		const size_t len1 = varchunk->size - head;
 
 		if(len1 < padded) // not enough space left on first part of buffer
 		{
 			// get second part of available buffer
 			void *buf2 = varchunk->buf;
-			size_t len2 = end & varchunk->mask;
+			const size_t len2 = end & varchunk->mask;
 
 			if(len2 < padded) // not enough space left on second buffer, either
 			{
 				varchunk->rsvd = 0;
+				varchunk->gapd = 0;
 				return NULL;
 			}
 			else // enough space left on second buffer, use it!
 			{
-				// fill end of first buffer with gap
-				varchunk_elmnt_t *elmnt = buf1;
-				elmnt->size = len1 - sizeof(varchunk_elmnt_t);
-				elmnt->gap = 1;
-				_varchunk_write_advance_raw(varchunk, head, len1);
-
 				varchunk->rsvd = minimum;
+				varchunk->gapd = len1;
 				return buf2 + sizeof(varchunk_elmnt_t);
 			}
 		}
 		else // enough space left on first part of buffer, use it!
 		{
 			varchunk->rsvd = minimum;
+			varchunk->gapd = 0;
 			return buf1 + sizeof(varchunk_elmnt_t);
 		}
 	}
@@ -212,11 +211,13 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 		if(space < padded) // no space left on contiguous buffer
 		{
 			varchunk->rsvd = 0;
+			varchunk->gapd = 0;
 			return NULL;
 		}
 		else // enough space left on contiguous buffer, use it!
 		{
 			varchunk->rsvd = minimum;
+			varchunk->gapd = 0;
 			return buf + sizeof(varchunk_elmnt_t);
 		}
 	}
@@ -229,21 +230,37 @@ varchunk_write_advance(varchunk_t *varchunk, size_t written)
 	assert(written <= varchunk->rsvd);
 
 	// write elmnt header at head
-	size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed);
-	varchunk_elmnt_t *elmnt = varchunk->buf + head;
-	elmnt->size = written;
-	elmnt->gap = 0;
+	const size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed);
+	if(varchunk->gapd > 0)
+	{
+		// fill end of first buffer with gap
+		varchunk_elmnt_t *elmnt = varchunk->buf + head;
+		elmnt->size = varchunk->gapd - sizeof(varchunk_elmnt_t);
+		elmnt->gap = 1;
+
+		// fill written element header
+		elmnt = varchunk->buf;
+		elmnt->size = written;
+		elmnt->gap = 0;
+	}
+	else // varchunk->gapd == 0
+	{
+		// fill written element header
+		varchunk_elmnt_t *elmnt = varchunk->buf + head;
+		elmnt->size = written;
+		elmnt->gap = 0;
+	}
 
 	// advance write head
 	_varchunk_write_advance_raw(varchunk, head,
-		sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(written));
+		varchunk->gapd + sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(written));
 }
 
 static inline void
 _varchunk_read_advance_raw(varchunk_t *varchunk, size_t tail, size_t read)
 {
 	// only consumer is allowed to advance read tail 
-	size_t new_tail = (tail + read) & varchunk->mask;
+	const size_t new_tail = (tail + read) & varchunk->mask;
 	atomic_store_explicit(&varchunk->tail, new_tail, memory_order_release);
 }
 
@@ -251,8 +268,8 @@ static inline const void *
 varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 {
 	size_t space; // size of available buffer
-	size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed); // read tail
-	size_t head = atomic_load_explicit(&varchunk->head, memory_order_acquire); // read head (producer modifies it any time)
+	const size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed); // read tail
+	const size_t head = atomic_load_explicit(&varchunk->head, memory_order_acquire); // read head (producer modifies it any time)
 
 	// calculate readable space
 	if(head > tail)
@@ -262,13 +279,13 @@ varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 
 	if(space > 0) // there may be chunks available for reading
 	{
-		size_t end = tail + space; // virtual end of available buffer
+		const size_t end = tail + space; // virtual end of available buffer
 
 		if(end > varchunk->size) // available buffer wraps around at end
 		{
 			// first part of available buffer
-			void *buf1 = varchunk->buf + tail;
-			size_t len1 = varchunk->size - tail;
+			const void *buf1 = varchunk->buf + tail;
+			const size_t len1 = varchunk->size - tail;
 			const varchunk_elmnt_t *elmnt = buf1;
 
 			if(elmnt->gap) // gap elmnt?
@@ -277,8 +294,8 @@ varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 				_varchunk_read_advance_raw(varchunk, tail, len1);
 
 				// second part of available buffer
-				void *buf2 = varchunk->buf;
-				elmnt = buf2;
+				const void *buf2 = varchunk->buf;
+				elmnt = buf2; // there will always be at least on element after a gap
 
 				*toread = elmnt->size;
 				return buf2 + sizeof(varchunk_elmnt_t);
@@ -292,22 +309,11 @@ varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 		else // available buffer is contiguous
 		{
 			// get buffer
-			void *buf = varchunk->buf + tail;
+			const void *buf = varchunk->buf + tail;
 			const varchunk_elmnt_t *elmnt = buf;
 
-			if(elmnt->gap) // a single gap elmnt?
-			{
-				// skip gap
-				_varchunk_read_advance_raw(varchunk, tail, space);
-
-				*toread = 0;
-				return NULL;
-			}
-			else // valid chunk, use it!
-			{
-				*toread = elmnt->size;
-				return buf + sizeof(varchunk_elmnt_t);
-			}
+			*toread = elmnt->size;
+			return buf + sizeof(varchunk_elmnt_t);
 		}
 	}
 	else // no chunks available aka empty buffer
@@ -321,7 +327,7 @@ static inline void
 varchunk_read_advance(varchunk_t *varchunk)
 {
 	// get elmnt header from tail (for size)
-	size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed);
+	const size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed);
 	const varchunk_elmnt_t *elmnt = varchunk->buf + tail;
 
 	// advance read tail

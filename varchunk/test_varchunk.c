@@ -18,27 +18,41 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <varchunk.h>
+
+#define ITERATIONS 10000000
+#define THRESHOLD (RAND_MAX / 256)
+
+static const struct timespec req = {
+	.tv_sec = 0,
+	.tv_nsec = 1
+};
 
 static void *
 producer_main(void *arg)
 {
 	varchunk_t *varchunk = arg;
 	void *ptr;
+	const void *end;
 	size_t written;
-	uint32_t cnt = 0;
+	uint64_t cnt = 0;
 
-	while(cnt < 10e6)
+	while(cnt < ITERATIONS)
 	{
+		if(rand() < THRESHOLD)
+			nanosleep(&req, NULL);
+
 		written = rand() * 1024.f / RAND_MAX;
 
 		if( (ptr = varchunk_write_request(varchunk, written)) )
 		{
-			uint64_t val = cnt;
-			*(uint64_t *)ptr = val;
+			end = ptr + written;
+			for(void *src=ptr; src<end; src+=sizeof(uint64_t))
+				*(uint64_t *)src = cnt;
 			varchunk_write_advance(varchunk, written);
-			//fprintf(stdout, "P %u %lu %zu\n", cnt, val, written);
+			//fprintf(stdout, "P %u %zu\n", cnt, written);
 			cnt++;
 		}
 		else
@@ -55,18 +69,23 @@ consumer_main(void *arg)
 {
 	varchunk_t *varchunk = arg;
 	const void *ptr;
+	const void *end;
 	size_t toread;
-	uint32_t cnt = 0;
+	uint64_t cnt = 0;
 
-	while(cnt < 10e6)
+	while(cnt < ITERATIONS)
 	{
+		if(rand() < THRESHOLD)
+			nanosleep(&req, NULL);
+
 		if( (ptr = varchunk_read_request(varchunk, &toread)) )
 		{
-			uint64_t val = *(uint64_t *)ptr;
-			if(val != cnt)
-				exit(-1); // TEST FAILED
+			end = ptr + toread;
+			for(const void *src=ptr; src<end; src+=sizeof(uint64_t))
+				if(*(const uint64_t *)src != cnt)
+					exit(-1); // TEST FAILED
 			varchunk_read_advance(varchunk);
-			//fprintf(stdout, "C %u %lu %zu\n", cnt, val, toread);
+			//fprintf(stdout, "C %u %zu\n", cnt, toread);
 			cnt++;
 		}
 		else
@@ -81,11 +100,16 @@ consumer_main(void *arg)
 int
 main(int argc, char **argv)
 {
+	const int seed = time(NULL);
+	srand(seed);
+
+	if(!varchunk_is_lock_free())
+		return -1; // TEST FAILED
+
 	pthread_t producer;
 	pthread_t consumer;
 	varchunk_t *varchunk = varchunk_new(8192);
-
-	if(!varchunk_is_lock_free())
+	if(!varchunk)
 		return -1; // TEST FAILED
 
 	pthread_create(&consumer, NULL, consumer_main, varchunk);

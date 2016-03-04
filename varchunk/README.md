@@ -1,6 +1,15 @@
 # Varchunk
 
-## Realtime-safe, lock-less, variable-chunk ring-buffer implementation
+## Ringbuffer optimized for realtime event handling
+
+### Properties
+
+* Is realtime-safe
+* Is lock-free
+* Supports variably sized chunks
+* Supports contiguous memory chunks
+* Supports zero copy operation
+* Uses a simplistic API
 
 ### Build Status
 
