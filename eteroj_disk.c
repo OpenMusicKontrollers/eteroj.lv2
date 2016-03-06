@@ -17,6 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <math.h>
 
 #include <eteroj.h>
@@ -104,7 +105,7 @@ static const props_def_t record_def = {
 
 static const props_def_t path_def = {
 	.property = ETEROJ_DISK_PATH_URI,
-	.access = LV2_PATCH__writable,
+	.access = LV2_PATCH__readable,
 	.type = LV2_ATOM__Path,
 	.mode = PROP_MODE_STATIC,
 	.maximum.i = 1024
@@ -560,13 +561,6 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		else
 			_trigger_open_play(handle);
 	}
-	else if(impl->def == &path_def)
-	{
-		if(handle->record)
-			_trigger_open_record(handle);
-		else
-			_trigger_open_play(handle);
-	}
 }
 
 static LV2_Handle
@@ -627,8 +621,24 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	osc_forge_init(&handle->oforge, handle->map);
 
 	char *tmp = make_path->path(make_path->handle, DEFAULT_FILE_NAME);
-	strcpy(handle->path, tmp);
-	free(tmp);
+	if(tmp)
+	{
+		strncpy(handle->path, tmp, 1024);
+		free(tmp);
+	
+		if(access(handle->path, F_OK)) // does not yet exist
+		{
+			fprintf(stderr, "touching file\n");
+			handle->io = fopen(handle->path, "w");
+			if(handle->io)
+			{
+				fclose(handle->io);
+				handle->io = NULL;
+			}
+			else
+				fprintf(stderr, "failed to touch file\n");
+		}
+	}
 	
 	handle->uris.eteroj_drain = handle->map->map(handle->map->handle, ETEROJ_DRAIN_URI);
 
@@ -642,7 +652,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	if(  props_register(&handle->props, &record_def, PROP_EVENT_WRITE, _intercept, &handle->record)
-		&& props_register(&handle->props, &path_def, PROP_EVENT_WRITE, _intercept, &handle->path))
+		&& props_register(&handle->props, &path_def, PROP_EVENT_NONE, NULL, &handle->path)) //FIXME
 	{
 		props_sort(&handle->props);
 	}
@@ -802,7 +812,7 @@ _work(LV2_Handle instance,
 	{
 		case JOB_PLAY:
 		{
-			while(!feof(handle->io))
+			while(handle->io && !feof(handle->io))
 			{
 				// read event header from disk
 				LV2_Atom_Event ev1;
@@ -858,7 +868,7 @@ _work(LV2_Handle instance,
 		{
 			const LV2_Atom_Event *ev;
 			size_t len;
-			while((ev = varchunk_read_request(handle->to_disk, &len)))
+			while(handle->io && (ev = varchunk_read_request(handle->to_disk, &len)))
 			{
 				double beats = ev->time.beats;
 
@@ -892,7 +902,7 @@ _work(LV2_Handle instance,
 				handle->seek_beats = 0.0;
 			}
 
-			while(!feof(handle->io))
+			while(handle->io && !feof(handle->io))
 			{
 				// read event header from disk
 				LV2_Atom_Event ev1;

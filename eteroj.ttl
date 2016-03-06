@@ -179,12 +179,12 @@ eteroj:disk
 	] ;
  
 	patch:writable
-		eteroj:disk_record ,
+		eteroj:disk_record ;
+	patch:readable
 		eteroj:disk_path ;
 
 	state:state [
 		eteroj:disk_record false ;
-		eteroj:disk_path <seq.osc> ;
 	] .
 
 # Query Plugin
