@@ -120,7 +120,8 @@ eteroj:io
 
 	# parameters
 	patch:writable
-		eteroj:url ,
+		eteroj:url ;
+	patch:readable
 		eteroj:status ,
 		eteroj:error ;
 
