@@ -25,13 +25,6 @@ set(ETEROJ_VERSION "${ETEROJ_MAJOR_VERSION}.${ETEROJ_MINOR_VERSION}.${ETEROJ_MIC
 add_definitions("-DETEROJ_VERSION=\"${ETEROJ_VERSION}\"")
 
 set(DEST lib/lv2/eteroj.lv2)
-if(WIN32)
-	set(LIB_EXT ".dll")
-elseif(APPLE)
-	set(LIB_EXT ".so")
-else()
-	set(LIB_EXT ".so")
-endif()
 
 find_package(PkgConfig) # ${PKG_CONFIG_FOUND}
 
@@ -47,6 +40,7 @@ add_library(eteroj MODULE
 	eteroj_query.c
 	eteroj_cloak.c
 	eteroj_pack.c
+	eteroj_control.c
 	tlsf-3.0/tlsf.c
 	jsmn/jsmn.c)
 target_link_libraries(eteroj ${LIBS})

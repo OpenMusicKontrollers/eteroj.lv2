@@ -81,6 +81,39 @@ eteroj:pack_path
 	rdfs:label "Path" ;
 	rdfs:range atom:String .
 
+eteroj:control_path_1
+	a lv2:Parameter ;
+	rdfs:label "Path 1" ;
+	rdfs:range atom:String .
+eteroj:control_path_2
+	a lv2:Parameter ;
+	rdfs:label "Path 2" ;
+	rdfs:range atom:String .
+eteroj:control_path_3
+	a lv2:Parameter ;
+	rdfs:label "Path 3" ;
+	rdfs:range atom:String .
+eteroj:control_path_4
+	a lv2:Parameter ;
+	rdfs:label "Path 4" ;
+	rdfs:range atom:String .
+eteroj:control_path_5
+	a lv2:Parameter ;
+	rdfs:label "Path 5" ;
+	rdfs:range atom:String .
+eteroj:control_path_6
+	a lv2:Parameter ;
+	rdfs:label "Path 6" ;
+	rdfs:range atom:String .
+eteroj:control_path_7
+	a lv2:Parameter ;
+	rdfs:label "Path 7" ;
+	rdfs:range atom:String .
+eteroj:control_path_8
+	a lv2:Parameter ;
+	rdfs:label "Path 8" ;
+	rdfs:range atom:String .
+
 # IO Plugin
 eteroj:io
 	a lv2:Plugin ,
@@ -264,7 +297,7 @@ eteroj:cloak
 eteroj:pack
 	a lv2:Plugin,
 		lv2:ConverterPlugin;
-	doap:name "Eteroj (Un)Pack " ;
+	doap:name "Eteroj (Un)Pack" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData state:interface ;
@@ -306,4 +339,108 @@ eteroj:pack
 	# default state
 	state:state [
 		eteroj:pack_path "/midi" ;
+	] .
+
+# Control Plugin
+eteroj:control
+	a lv2:Plugin,
+		lv2:ConverterPlugin;
+	doap:name "Eteroj Control" ;
+	doap:license lic:Artistic-2.0 ;
+	lv2:project proj:eteroj ;
+	lv2:extensionData state:interface ;
+	lv2:requiredFeature state:loadDefaultState ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+
+	lv2:port [
+	  a lv2:InputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports atom:Object ;
+		atom:supports osc:Event ;
+		atom:supports patch:Message ;
+		lv2:index 0 ;
+		lv2:symbol "event_in" ;
+		lv2:name "Event Input" ;
+		lv2:designation lv2:control ;
+	] , [
+	  a lv2:OutputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports atom:Object ;
+		atom:supports patch:Message ;
+		lv2:index 1 ;
+		lv2:symbol "notify" ;
+		lv2:name "Notify" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 2 ;
+		lv2:symbol "control_2" ;
+		lv2:name "Control 2" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 3 ;
+		lv2:symbol "control_3" ;
+		lv2:name "Control 3" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 4 ;
+		lv2:symbol "control_4" ;
+		lv2:name "Control 4" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 5 ;
+		lv2:symbol "control_5" ;
+		lv2:name "Control 5" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 6 ;
+		lv2:symbol "control_6" ;
+		lv2:name "Control 6" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 7 ;
+		lv2:symbol "control_7" ;
+		lv2:name "Control 7" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 8 ;
+		lv2:symbol "control_8" ;
+		lv2:name "Control 8" ;
+	] , [
+	  a lv2:OutputPort ,
+			lv2:ControlPort ;
+		lv2:index 2 ;
+		lv2:symbol "control_1" ;
+		lv2:name "Control 1" ;
+	] ;
+
+	# parameters
+	patch:writable
+		eteroj:control_path_1 ,
+		eteroj:control_path_2 ,
+		eteroj:control_path_3 ,
+		eteroj:control_path_4 ,
+		eteroj:control_path_5 ,
+		eteroj:control_path_6 ,
+		eteroj:control_path_7 ,
+		eteroj:control_path_8 ;
+
+	# default state
+	state:state [
+		eteroj:control_path_1 "/eteroj/control/1" ;
+		eteroj:control_path_2 "/eteroj/control/2" ;
+		eteroj:control_path_3 "/eteroj/control/3" ;
+		eteroj:control_path_4 "/eteroj/control/4" ;
+		eteroj:control_path_5 "/eteroj/control/5" ;
+		eteroj:control_path_6 "/eteroj/control/6" ;
+		eteroj:control_path_7 "/eteroj/control/7" ;
+		eteroj:control_path_8 "/eteroj/control/8" ;
 	] .
