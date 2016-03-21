@@ -51,6 +51,7 @@
 #define ETEROJ_QUERY_URI							ETEROJ_URI"#query"
 #define ETEROJ_CLOAK_URI							ETEROJ_URI"#cloak"
 #define ETEROJ_PACK_URI								ETEROJ_URI"#pack"
+#define ETEROJ_NINJA_URI							ETEROJ_URI"#ninja"
 #define ETEROJ_CONTROL_URI						ETEROJ_URI"#control"
 
 extern const LV2_Descriptor eteroj_io;
@@ -58,6 +59,7 @@ extern const LV2_Descriptor eteroj_disk;
 extern const LV2_Descriptor eteroj_query;
 extern const LV2_Descriptor eteroj_cloak;
 extern const LV2_Descriptor eteroj_pack;
+extern const LV2_Descriptor eteroj_ninja;
 extern const LV2_Descriptor eteroj_control;
 
 #endif // _ETEROJ_LV2_H

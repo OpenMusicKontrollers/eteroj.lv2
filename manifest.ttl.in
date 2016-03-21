@@ -59,6 +59,14 @@ eteroj:pack
 	lv2:binary <eteroj@CMAKE_SHARED_MODULE_SUFFIX@> ;
 	rdfs:seeAlso <eteroj.ttl> .
 
+# Eteroj Atom Serializer
+eteroj:ninja
+	a lv2:Plugin ;
+	lv2:minorVersion @ETEROJ_MINOR_VERSION@ ;
+	lv2:microVersion @ETEROJ_MICRO_VERSION@ ;
+	lv2:binary <eteroj@CMAKE_SHARED_MODULE_SUFFIX@> ;
+	rdfs:seeAlso <eteroj.ttl> .
+
 # Eteroj Control
 eteroj:control
 	a lv2:Plugin ;

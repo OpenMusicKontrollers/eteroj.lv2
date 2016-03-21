@@ -301,7 +301,7 @@ eteroj:pack
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData state:interface ;
-	lv2:requiredFeature state:loadDefaultState ;
+	lv2:requiredFeature urid:map, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
 
 	# input event port
@@ -341,6 +341,38 @@ eteroj:pack
 		eteroj:pack_path "/midi" ;
 	] .
 
+# Ninja Plugin
+eteroj:ninja
+	a lv2:Plugin,
+		lv2:ConverterPlugin;
+	doap:name "Eteroj Ninja" ;
+	doap:license lic:Artistic-2.0 ;
+	lv2:project proj:eteroj ;
+	lv2:requiredFeature urid:map, urid:unmap ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+
+	# input event port
+	lv2:port [
+	  a lv2:InputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports osc:Event ;
+		lv2:index 0 ;
+		lv2:symbol "event_in" ;
+		lv2:name "Event Input" ;
+		lv2:designation lv2:control ;
+	] , [
+	# output event port
+	  a lv2:OutputPort ,
+			atom:AtomPort ;
+		atom:bufferType atom:Sequence ;
+		atom:supports osc:Event ;
+		lv2:index 1 ;
+		lv2:symbol "event_out" ;
+		lv2:name "Event Output" ;
+		lv2:designation lv2:control ;
+	] .
+
 # Control Plugin
 eteroj:control
 	a lv2:Plugin,
@@ -349,7 +381,7 @@ eteroj:control
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData state:interface ;
-	lv2:requiredFeature state:loadDefaultState ;
+	lv2:requiredFeature urid:map, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
 
 	lv2:port [

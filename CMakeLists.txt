@@ -32,6 +32,10 @@ pkg_search_module(UV REQUIRED libuv>=1.0)
 include_directories(${UV_INCLUDE_DIRS})
 set(LIBS ${LIBS} ${UV_LDFLAGS})
 
+pkg_search_module(SRATOM REQUIRED sratom-0>=0.4.0)
+include_directories(${SRATOM_INCLUDE_DIRS})
+set(LIBS ${LIBS} ${SRATOM_LDFLAGS})
+
 # eteroj
 add_library(eteroj MODULE
 	eteroj.c
@@ -40,6 +44,7 @@ add_library(eteroj MODULE
 	eteroj_query.c
 	eteroj_cloak.c
 	eteroj_pack.c
+	eteroj_ninja.c
 	eteroj_control.c
 	tlsf-3.0/tlsf.c
 	jsmn/jsmn.c)
