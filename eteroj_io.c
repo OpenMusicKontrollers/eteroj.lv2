@@ -47,7 +47,7 @@ enum _plugstate_t {
 
 struct _list_t {
 	list_t *next;
-	int64_t frames;
+	double frames;
 
 	size_t size;
 	osc_data_t buf [0];
@@ -552,11 +552,11 @@ _unroll_bundle(const osc_data_t *buf, size_t size, void *data)
 
 	uint64_t time = be64toh(*(uint64_t *)(buf + 8));
 
-	int64_t frames;
+	double frames;
 	if(handle->osc_sched)
 		frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
 	else
-		frames = 0;
+		frames = 0.0;
 
 	// add event to list
 	list_t *l = tlsf_malloc(handle->tlsf, sizeof(list_t) + size);
@@ -932,9 +932,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 		{
 			uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
 
-			int64_t frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
-			if(frames < 0) // we may occasionally get -1 frames events when rescheduling
-				l->frames = 0;
+			double frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
+			if(frames < 0.0) // we may occasionally get -1 frames events when rescheduling
+				l->frames = 0.0;
 			else
 				l->frames = frames;
 		}
@@ -954,11 +954,11 @@ run(LV2_Handle instance, uint32_t nsamples)
 	// handle scheduled bundles
 	for(list_t *l = handle->list; l; )
 	{
-		if(l->frames < 0) // late event
+		if(l->frames < 0.0) // late event
 		{
 			if(handle->log)
-				lv2_log_trace(&handle->logger, "late event: %li samples", l->frames);
-			l->frames = 0; // dispatch as early as possible
+				lv2_log_trace(&handle->logger, "late event: %lf samples", l->frames);
+			l->frames = 0.0; // dispatch as early as possible
 		}
 		else if(l->frames >= nsamples) // not scheduled for this period
 		{
