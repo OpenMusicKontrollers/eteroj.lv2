@@ -19,6 +19,12 @@
 #define _ETEROJ_LV2_H
 
 #include <stdint.h>
+#if !defined(_WIN32)
+#	include <sys/mman.h>
+#else
+#	define mlock(...)
+#	define munlock(...)
+#endif
 
 #include "lv2/lv2plug.in/ns/ext/atom/atom.h"
 #include "lv2/lv2plug.in/ns/ext/atom/forge.h"

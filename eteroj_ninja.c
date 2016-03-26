@@ -53,6 +53,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
 	if(!handle)
 		return NULL;
+	mlock(handle, sizeof(plughandle_t));
 
 	for(unsigned i=0; features[i]; i++)
 	{
@@ -192,6 +193,7 @@ cleanup(LV2_Handle instance)
 	plughandle_t *handle = (plughandle_t *)instance;
 
 	sratom_free(handle->sratom);
+	munlock(handle, sizeof(plughandle_t));
 	free(handle);
 }
 

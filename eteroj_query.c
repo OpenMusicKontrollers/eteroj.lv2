@@ -80,6 +80,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
 	if(!handle)
 		return NULL;
+	mlock(handle, sizeof(plughandle_t));
 
 	const LV2_State_Make_Path *make_path = NULL;
 
@@ -782,6 +783,7 @@ cleanup(LV2_Handle instance)
 
 	if(handle->rb)
 		varchunk_free(handle->rb);
+	munlock(handle, sizeof(plughandle_t));
 	free(handle);
 }
 

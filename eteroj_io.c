@@ -624,6 +624,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
 	if(!handle)
 		return NULL;
+	mlock(handle, sizeof(plughandle_t));
 
 	for(i=0; features[i]; i++)
 	{
@@ -1020,8 +1021,8 @@ cleanup(LV2_Handle instance)
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 
-	if(handle)
-		free(handle);
+	munlock(handle, sizeof(plughandle_t));
+	free(handle);
 }
 
 static const void*
