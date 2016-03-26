@@ -661,8 +661,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
 	// init data
-	handle->data.from_worker = varchunk_new(BUF_SIZE);
-	handle->data.to_worker = varchunk_new(BUF_SIZE);
+	handle->data.from_worker = varchunk_new(BUF_SIZE, true);
+	handle->data.to_worker = varchunk_new(BUF_SIZE, true);
 	if(!handle->data.from_worker || !handle->data.to_worker)
 	{
 		free(handle);

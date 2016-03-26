@@ -643,8 +643,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	
 	handle->uris.eteroj_drain = handle->map->map(handle->map->handle, ETEROJ_DRAIN_URI);
 
-	handle->to_disk = varchunk_new(BUF_SIZE);
-	handle->from_disk = varchunk_new(BUF_SIZE);
+	handle->to_disk = varchunk_new(BUF_SIZE, true);
+	handle->from_disk = varchunk_new(BUF_SIZE, true);
 
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{

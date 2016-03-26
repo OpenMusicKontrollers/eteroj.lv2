@@ -159,7 +159,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	handle->cnt = 0;
 
-	handle->rb = varchunk_new(65536);
+	handle->rb = varchunk_new(65536, false);
 
 	return handle;
 }
