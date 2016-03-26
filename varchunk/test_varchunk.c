@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Hanspeter Portner (dev@open-music-kontrollers.ch)
+ * Copyright (c) 2015-2016 Hanspeter Portner (dev@open-music-kontrollers.ch)
  *
  * This is free software: you can redistribute it and/or modify
  * it under the terms of the Artistic License 2.0 as published by
@@ -108,7 +108,7 @@ main(int argc, char **argv)
 
 	pthread_t producer;
 	pthread_t consumer;
-	varchunk_t *varchunk = varchunk_new(8192);
+	varchunk_t *varchunk = varchunk_new(8192, true);
 	if(!varchunk)
 		return -1; // TEST FAILED
 

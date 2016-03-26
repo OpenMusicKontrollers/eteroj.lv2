@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Hanspeter Portner (dev@open-music-kontrollers.ch)
+ * Copyright (c) 2015-2016 Hanspeter Portner (dev@open-music-kontrollers.ch)
  *
  * This is free software: you can redistribute it and/or modify
  * it under the terms of the Artistic License 2.0 as published by
@@ -25,6 +25,7 @@ extern "C" {
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <assert.h>
 
 #if !defined(_WIN32)
@@ -41,7 +42,7 @@ static inline int
 varchunk_is_lock_free(void);
 
 static inline varchunk_t *
-varchunk_new(size_t minimum);
+varchunk_new(size_t minimum, bool release_and_acquire);
 
 static inline void
 varchunk_free(varchunk_t *varchunk);
@@ -77,6 +78,9 @@ struct _varchunk_t {
 	size_t rsvd;
 	size_t gapd;
 
+	memory_order acquire;
+	memory_order release;
+
   _Atomic size_t head;
   _Atomic size_t tail;
 
@@ -93,12 +97,19 @@ varchunk_is_lock_free(void)
 }
 
 static inline varchunk_t *
-varchunk_new(size_t minimum)
+varchunk_new(size_t minimum, bool release_and_acquire)
 {
 	varchunk_t *varchunk;
 
 	if(!(varchunk = calloc(1, sizeof(varchunk_t))))
 		return NULL;
+
+	varchunk->acquire = release_and_acquire
+		? memory_order_acquire
+		: memory_order_relaxed;
+	varchunk->release = release_and_acquire
+		? memory_order_release
+		: memory_order_relaxed;
 
 	atomic_init(&varchunk->head, 0);
 	atomic_init(&varchunk->tail, 0);
@@ -144,12 +155,14 @@ _varchunk_write_advance_raw(varchunk_t *varchunk, size_t head, size_t written)
 {
 	// only producer is allowed to advance write head
 	const size_t new_head = (head + written) & varchunk->mask;
-	atomic_store_explicit(&varchunk->head, new_head, memory_order_release);
+	atomic_store_explicit(&varchunk->head, new_head, varchunk->release);
 }
 
 static inline void *
 varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 {
+	assert(varchunk);
+
 	if(minimum == 0)
 	{
 		varchunk->rsvd = 0;
@@ -160,7 +173,7 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 	size_t space; // size of writable buffer
 	size_t end; // virtual end of writable buffer
 	const size_t head = atomic_load_explicit(&varchunk->head, memory_order_relaxed); // read head
-	const size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_acquire); // read tail (consumer modifies it any time)
+	const size_t tail = atomic_load_explicit(&varchunk->tail, varchunk->acquire); // read tail (consumer modifies it any time)
 	const size_t padded = 2*sizeof(varchunk_elmnt_t) + VARCHUNK_PAD(minimum);
 
 	// calculate writable space
@@ -226,6 +239,7 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 static inline void
 varchunk_write_advance(varchunk_t *varchunk, size_t written)
 {
+	assert(varchunk);
 	// fail miserably if stupid programmer tries to write more than rsvd
 	assert(written <= varchunk->rsvd);
 
@@ -261,15 +275,16 @@ _varchunk_read_advance_raw(varchunk_t *varchunk, size_t tail, size_t read)
 {
 	// only consumer is allowed to advance read tail 
 	const size_t new_tail = (tail + read) & varchunk->mask;
-	atomic_store_explicit(&varchunk->tail, new_tail, memory_order_release);
+	atomic_store_explicit(&varchunk->tail, new_tail, varchunk->release);
 }
 
 static inline const void *
 varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 {
+	assert(varchunk);
 	size_t space; // size of available buffer
 	const size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed); // read tail
-	const size_t head = atomic_load_explicit(&varchunk->head, memory_order_acquire); // read head (producer modifies it any time)
+	const size_t head = atomic_load_explicit(&varchunk->head, varchunk->acquire); // read head (producer modifies it any time)
 
 	// calculate readable space
 	if(head > tail)
@@ -326,6 +341,7 @@ varchunk_read_request(varchunk_t *varchunk, size_t *toread)
 static inline void
 varchunk_read_advance(varchunk_t *varchunk)
 {
+	assert(varchunk);
 	// get elmnt header from tail (for size)
 	const size_t tail = atomic_load_explicit(&varchunk->tail, memory_order_relaxed);
 	const varchunk_elmnt_t *elmnt = varchunk->buf + tail;
