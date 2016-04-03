@@ -351,7 +351,10 @@ _intercept_learn(void *data, LV2_Atom_Forge *forge, int64_t frames,
 static inline void
 _update_divider(plughandle_t *handle, int i)
 {
-	handle->divider[i] = 1.f / (handle->max[i] - handle->min[i]);
+	if(handle->max[i] != handle->min[i])
+		handle->divider[i] = 1.f / (handle->max[i] - handle->min[i]);
+	else
+		handle->divider[i] = 1.f;
 }
 
 static inline void
