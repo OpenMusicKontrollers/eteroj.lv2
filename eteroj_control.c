@@ -60,7 +60,7 @@ struct _plughandle_t {
 	LV2_URID max_urid [MAX_SLOTS];
 
 	float value [MAX_SLOTS];
-	float divider [MAX_SLOTS];
+	double divider [MAX_SLOTS];
 };
 
 static const props_def_t stat_learn [MAX_SLOTS] = {
@@ -352,9 +352,9 @@ static inline void
 _update_divider(plughandle_t *handle, int i)
 {
 	if(handle->max[i] != handle->min[i])
-		handle->divider[i] = 1.f / (handle->max[i] - handle->min[i]);
+		handle->divider[i] = 1.0 / (handle->max[i] - handle->min[i]);
 	else
-		handle->divider[i] = 1.f;
+		handle->divider[i] = 1.0;
 }
 
 static inline void
