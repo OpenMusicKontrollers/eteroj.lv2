@@ -112,6 +112,7 @@ struct _props_scale_point_t {
 
 struct _props_def_t {
 	const char *label;
+	const char *comment;
 	const char *property;
 	const char *access;
 	const char *unit;
@@ -165,6 +166,7 @@ struct _props_t {
 
 		LV2_URID rdfs_label;
 		LV2_URID rdfs_range;
+		LV2_URID rdfs_comment;
 
 		LV2_URID lv2_minimum;
 		LV2_URID lv2_maximum;
@@ -225,7 +227,6 @@ props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void 
 static inline LV2_Atom_Forge_Ref
 props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property);
 
-// rt-safe
 static inline LV2_State_Status
 props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store,
 	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features);
@@ -247,8 +248,14 @@ _impl_spin_lock(props_impl_t *impl)
 	}
 }
 
+static inline bool
+_impl_try_lock(props_impl_t *impl)
+{
+	return atomic_flag_test_and_set_explicit(&impl->lock, memory_order_acquire) == false;
+}
+
 static inline void
-_impl_spin_unlock(props_impl_t *impl)
+_impl_unlock(props_impl_t *impl)
 {
 	atomic_flag_clear_explicit(&impl->lock, memory_order_release);
 }
@@ -409,57 +416,112 @@ _props_string_set_cb(props_t *props, void *value, LV2_URID new_type, const void 
 	strcpy((char *)value, (const char *)new_value);
 }
 
-static inline int
-_signum(LV2_URID urid1, LV2_URID urid2)
+static inline void
+_type_qsort(props_type_t *a, unsigned n)
 {
-	if(urid1 < urid2)
-		return -1;
-	else if(urid1 > urid2)
-		return 1;
+	if(n < 2)
+		return;
+	
+	const props_type_t *p = &a[n/2];
 
-	return 0;
+	unsigned i, j;
+	for(i=0, j=n-1; ; i++, j--)
+	{
+		while(a[i].urid < p->urid)
+			i++;
+
+		while(p->urid < a[j].urid)
+			j--;
+
+		if(i >= j)
+			break;
+
+		const props_type_t t = a[i];
+		a[i] = a[j];
+		a[j] = t;
+	}
+
+	_type_qsort(a, i);
+	_type_qsort(&a[i], n - i);
 }
 
-static int
-_impl_sort(const void *itm1, const void *itm2)
+static inline props_type_t *
+_type_bsearch(LV2_URID p, props_type_t *a, unsigned n)
 {
-	const props_impl_t *impl1 = itm1;
-	const props_impl_t *impl2 = itm2;
+	unsigned start = 0;
+	unsigned end = n;
 
-	return _signum(impl1->property, impl2->property);
+	while(start < end)
+	{
+		const unsigned mid = start + (end - start)/2;
+		props_type_t *dst = &a[mid];
+
+		if(p < dst->urid)
+			end = mid;
+		else if(p > dst->urid)
+			start = mid + 1;
+		else
+			return dst;
+	}
+
+	return NULL;
 }
 
-static int
-_impl_search(const void *itm1, const void *itm2)
+static inline void
+_impl_qsort(props_impl_t *a, unsigned n)
 {
-	const LV2_URID *property = itm1;
-	const props_impl_t *impl = itm2;
+	if(n < 2)
+		return;
+	
+	const props_impl_t *p = &a[n/2];
 
-	return _signum(*property, impl->property);
+	unsigned i, j;
+	for(i=0, j=n-1; ; i++, j--)
+	{
+		while(a[i].property < p->property)
+			i++;
+
+		while(p->property < a[j].property)
+			j--;
+
+		if(i >= j)
+			break;
+
+		const props_impl_t t = a[i];
+		a[i] = a[j];
+		a[j] = t;
+	}
+
+	_impl_qsort(a, i);
+	_impl_qsort(&a[i], n - i);
 }
 
-static int
-_type_sort(const void *itm1, const void *itm2)
+static inline props_impl_t *
+_impl_bsearch(LV2_URID p, props_impl_t *a, unsigned n)
 {
-	const props_type_t *type1 = itm1;
-	const props_type_t *type2 = itm2;
+	unsigned start = 0;
+	unsigned end = n;
 
-	return _signum(type1->urid, type2->urid);
-}
+	while(start < end)
+	{
+		const unsigned mid = start + (end - start)/2;
+		props_impl_t *dst = &a[mid];
 
-static int
-_type_cmp(const void *itm1, const void *itm2)
-{
-	const LV2_URID *urid = itm1;
-	const props_type_t *type = itm2;
+		if(p < dst->property)
+			end = mid;
+		else if(p > dst->property)
+			start = mid + 1;
+		else
+			return dst;
+	}
 
-	return _signum(*urid, type->urid);
+	return NULL;
 }
 
 static inline props_impl_t *
 _props_impl_search(props_t *props, LV2_URID property)
 {
-	return bsearch(&property, props->impls, props->nimpls, sizeof(props_impl_t), _impl_search);
+	return _impl_bsearch(property, props->impls, props->nimpls);
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -497,13 +559,22 @@ _props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 }
 
 static inline void
-_props_set(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
+_props_set_spin(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
 {
 	_impl_spin_lock(impl);
 
 	impl->type->set_cb(props, impl->value, type, value);
 
-	_impl_spin_unlock(impl);
+	_impl_unlock(impl);
+}
+
+static inline void
+_props_set_try(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
+{
+	if(_impl_try_lock(impl))
+		impl->type->set_cb(props, impl->value, type, value);
+
+	_impl_unlock(impl);
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -581,6 +652,11 @@ _props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 				ref = lv2_atom_forge_urid(forge, props->urid.patch_wildcard);
 
 			if(ref)
+				ref = lv2_atom_forge_key(forge, props->urid.rdfs_comment);
+			if(ref)
+				ref = lv2_atom_forge_urid(forge, props->urid.patch_wildcard);
+
+			if(ref)
 				ref = lv2_atom_forge_key(forge, props->urid.lv2_minimum);
 			if(ref)
 				ref = lv2_atom_forge_urid(forge, props->urid.patch_wildcard);
@@ -619,6 +695,14 @@ _props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 					ref = lv2_atom_forge_key(forge, props->urid.rdfs_label);
 				if(ref)
 					ref = lv2_atom_forge_string(forge, def->label, strlen(def->label));
+			}
+
+			if(def->comment)
+			{
+				if(ref)
+					ref = lv2_atom_forge_key(forge, props->urid.rdfs_comment);
+				if(ref)
+					ref = lv2_atom_forge_string(forge, def->comment, strlen(def->comment));
 			}
 
 			if(ref)
@@ -709,6 +793,8 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 		"http://www.w3.org/2000/01/rdf-schema#label");
 	props->urid.rdfs_range = map->map(map->handle,
 		"http://www.w3.org/2000/01/rdf-schema#range");
+	props->urid.rdfs_comment = map->map(map->handle,
+		"http://www.w3.org/2000/01/rdf-schema#comment");
 
 	props->urid.lv2_minimum = map->map(map->handle, LV2_CORE__minimum);
 	props->urid.lv2_maximum = map->map(map->handle, LV2_CORE__maximum);
@@ -800,7 +886,7 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	ptr++;
 
 	assert(ptr == PROPS_TYPE_N);
-	qsort(props->types, PROPS_TYPE_N, sizeof(props_type_t), _type_sort);
+	_type_qsort(props->types, PROPS_TYPE_N);
 
 	return 1;
 }
@@ -816,8 +902,7 @@ props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
 		return 0;
 
 	const LV2_URID type = props->map->map(props->map->handle, def->type);
-	props_type_t *props_type = bsearch(&type, props->types, PROPS_TYPE_N,
-		sizeof(props_type_t), _type_cmp);
+	const props_type_t *props_type = _type_bsearch(type, props->types, PROPS_TYPE_N);
 
 	if(!props_type)
 		return 0;
@@ -848,7 +933,7 @@ props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
 static inline void
 props_sort(props_t *props)
 {
-	qsort(props->impls, props->nimpls, sizeof(props_impl_t), _impl_sort);
+	_impl_qsort(props->impls, props->nimpls);
 }
 
 static inline int
@@ -880,8 +965,6 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 		if(!property)
 		{
-			if(props->nimpls)
-				*ref = 1; // needed to get loop started
 			for(unsigned i = 0; i < props->nimpls; i++)
 			{
 				props_impl_t *impl = &props->impls[i];
@@ -944,7 +1027,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		props_impl_t *impl = _props_impl_search(props, property->body);
 		if(impl && (impl->access == props->urid.patch_writable) )
 		{
-			_props_set(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
+			_props_set_try(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
 			if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
 				impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			return 1;
@@ -983,7 +1066,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			props_impl_t *impl = _props_impl_search(props, property);
 			if(impl && (impl->access == props->urid.patch_writable) )
 			{
-				_props_set(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
+				_props_set_try(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
 				if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
 					impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			}
@@ -1000,7 +1083,7 @@ props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void 
 	props_impl_t *impl = _props_impl_search(props, property);
 
 	if(impl)
-		_props_set(props, impl, type, value);
+		_props_set_try(props, impl, type, value);
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -1048,7 +1131,7 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 
 			memcpy(value, impl->value, size);
 
-			_impl_spin_unlock(impl);
+			_impl_unlock(impl);
 
 			if( map_path && (impl->type->urid == forge->Path) )
 			{
@@ -1108,13 +1191,13 @@ props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function
 				char *absolute = map_path->absolute_path(map_path->handle, value);
 				if(absolute)
 				{
-					_props_set(props, impl, type, absolute);
+					_props_set_spin(props, impl, type, absolute);
 					free(absolute);
 				}
 			}
 			else // !Path
 			{
-				_props_set(props, impl, type, value);
+				_props_set_spin(props, impl, type, value);
 			}
 
 			if(impl->event_cb && (impl->event_mask & PROP_EVENT_RESTORE) )

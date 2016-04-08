@@ -70,6 +70,7 @@ struct _plughandle_t {
 
 static const props_def_t dyn1 = {
 	.label = "Int",
+	.comment = "This is a 32-bit integer",
 	.property = PROPS_PREFIX"Int",
 	.access = LV2_PATCH__writable,
 	.unit = LV2_UNITS__hz,
@@ -81,6 +82,7 @@ static const props_def_t dyn1 = {
 
 static const props_def_t dyn2 = {
 	.label = "Long",
+	.comment = "This is a 64-bit integer",
 	.property = PROPS_PREFIX"Long",
 	.access = LV2_PATCH__readable,
 	.unit = LV2_UNITS__khz,
@@ -92,6 +94,7 @@ static const props_def_t dyn2 = {
 
 static const props_def_t dyn3 = {
 	.label = "Float",
+	.comment = "This is a 32-bit floating point",
 	.property = PROPS_PREFIX"Float",
 	.access = LV2_PATCH__writable,
 	.unit = LV2_UNITS__mhz,
@@ -103,6 +106,7 @@ static const props_def_t dyn3 = {
 
 static const props_def_t dyn4 = {
 	.label = "Double",
+	.comment = "This is a 64-bit floating point",
 	.property = PROPS_PREFIX"Double",
 	.access = LV2_PATCH__readable,
 	.unit = LV2_UNITS__db,
@@ -122,6 +126,7 @@ static const props_scale_point_t scale_points5 [] = {
 
 static const props_def_t dyn5 = {
 	.label = "scaleInt",
+	.comment = "This is a 32-bit integer enumeration",
 	.property = PROPS_PREFIX"scaleInt",
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__Int,
@@ -133,6 +138,7 @@ static const props_def_t dyn5 = {
 
 static const props_def_t dyn6 = {
 	.label = "Bool",
+	.comment = "This is a boolean",
 	.property = PROPS_PREFIX"Bool",
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__Bool,
@@ -143,6 +149,7 @@ static const props_def_t dyn6 = {
 
 static const props_def_t dyn7 = {
 	.label = "String",
+	.comment = "This is a string",
 	.property = PROPS_PREFIX"String",
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__String,

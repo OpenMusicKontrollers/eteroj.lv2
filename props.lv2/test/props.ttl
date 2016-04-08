@@ -49,6 +49,7 @@ props:statInt
 	a lv2:Parameter ;
 	rdfs:range atom:Int ;
 	rdfs:label "statInt" ;
+	rdfs:comment "This is a 32-bit integer" ;
 	units:unit units:hz ;
 	lv2:minimum 0 ;
 	lv2:maximum 10 .
@@ -57,6 +58,7 @@ props:statLong
 	a lv2:Parameter ;
 	rdfs:range atom:Long ;
 	rdfs:label "statLong" ;
+	rdfs:comment "This is a 64-bit integer" ;
 	units:unit units:khz ;
 	lv2:minimum 0 ;
 	lv2:maximum 20 .
@@ -65,6 +67,7 @@ props:statFloat
 	a lv2:Parameter ;
 	rdfs:range atom:Float ;
 	rdfs:label "statFloat" ;
+	rdfs:comment "This is a 32-bit float" ;
 	units:unit units:mhz ;
 	lv2:minimum -0.5 ;
 	lv2:maximum 0.5 .
@@ -73,6 +76,7 @@ props:statDouble
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "statDouble" ;
+	rdfs:comment "This is a 64-bit double" ;
 	units:unit units:db ;
 	lv2:minimum -1.0 ;
 	lv2:maximum 1.0 .
@@ -80,12 +84,14 @@ props:statDouble
 props:statString
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
-	rdfs:label "statString" .
+	rdfs:label "statString" ;
+	rdfs:comment "This is a string" .
 
 props:statPath
 	a lv2:Parameter ;
 	rdfs:range atom:Path ;
-	rdfs:label "statPath" .
+	rdfs:label "statPath" ;
+	rdfs:comment "This is a path" .
 
 # Looper Test
 props:test
