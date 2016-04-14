@@ -233,7 +233,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	const LV2_Atom_Object *obj, LV2_Atom_Forge_Ref *ref);
 
 // rt-safe
-static inline void
+static inline bool
 props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void *value);
 
 // rt-safe
@@ -1157,13 +1157,15 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	return 0; // did not handle a patch event
 }
 
-static inline void
+static inline bool
 props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void *value)
 {
 	props_impl_t *impl = _props_impl_search(props, property);
 
 	if(impl)
-		_props_set_try(props, impl, type, value);
+		return _props_set_try(props, impl, type, value);
+
+	return false;
 }
 
 static inline LV2_Atom_Forge_Ref
