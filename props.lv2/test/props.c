@@ -25,6 +25,7 @@
 #define PROPS_TEST_URI	PROPS_PREFIX"test"
 
 #define MAX_NPROPS 32
+#define MAX_STRLEN 256
 
 typedef struct _plughandle_t plughandle_t;
 
@@ -35,6 +36,7 @@ struct _plughandle_t {
 	LV2_Atom_Forge_Ref ref;
 
 	LV2_URID log_trace;
+	LV2_URID log_note;
 
 	PROPS_T(props, MAX_NPROPS);
 
@@ -45,7 +47,7 @@ struct _plughandle_t {
 		double val4;
 		int32_t val5;
 		int32_t val6;
-		char val7 [256];
+		char val7 [MAX_STRLEN];
 	} dyn;
 
 	struct {
@@ -53,8 +55,8 @@ struct _plughandle_t {
 		int64_t val2;
 		float val3;
 		double val4;
-		char val5 [256];
-		char val6 [256];
+		char val5 [MAX_STRLEN];
+		char val6 [MAX_STRLEN];
 	} stat;
 
 	struct {
@@ -154,7 +156,7 @@ static const props_def_t dyn7 = {
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_DYNAMIC,
-	.maximum.s = 256, // strlen
+	.maximum.s = MAX_STRLEN // strlen
 };
 
 static const props_def_t stat1 = {
@@ -195,7 +197,7 @@ static const props_def_t stat5 = {
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_STATIC,
-	.maximum.s = 256 // strlen
+	.maximum.s = MAX_STRLEN // strlen
 };
 
 static const props_def_t stat6 = {
@@ -204,7 +206,7 @@ static const props_def_t stat6 = {
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__Path,
 	.mode = PROP_MODE_STATIC,
-	.maximum.s = 256 // strlen
+	.maximum.s = MAX_STRLEN // strlen
 };
 
 static int
@@ -252,12 +254,22 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		}
 		case PROP_EVENT_SAVE:
 		{
-			_log_printf(handle, handle->log_trace, "SAVE    : %s", impl->def->label);
+			_log_printf(handle, handle->log_note, "SAVE    : %s", impl->def->label);
+			break;
+		}
+		case PROP_EVENT_STASH:
+		{
+			_log_printf(handle, handle->log_trace, "STASH   : %s", impl->def->label);
+			break;
+		}
+		case PROP_EVENT_APPLY:
+		{
+			_log_printf(handle, handle->log_trace, "APPLY   : %s", impl->def->label);
 			break;
 		}
 		case PROP_EVENT_RESTORE:
 		{
-			_log_printf(handle, handle->log_trace, "RESTORE : %s", impl->def->label);
+			_log_printf(handle, handle->log_note, "RESTORE : %s", impl->def->label);
 			break;
 		}
 	}
@@ -382,6 +394,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	handle->log_trace = handle->map->map(handle->map->handle, LV2_LOG__Trace);
+	handle->log_note = handle->map->map(handle->map->handle, LV2_LOG__Note);
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))

@@ -39,6 +39,7 @@ extern "C" {
 
 // definitions
 #define PROPS_TYPE_N 9
+#define PROPS_STASH_SIZE 0x400 //TODO how big?
 
 // unions
 typedef union _props_raw_t props_raw_t;
@@ -96,14 +97,16 @@ enum _props_event_t {
 	PROP_EVENT_SET				= (1 << 1),
 	PROP_EVENT_SAVE				= (1 << 2),
 	PROP_EVENT_RESTORE		= (1 << 3),
-	PROP_EVENT_REGISTER		= (1 << 4)
+	PROP_EVENT_STASH			= (1 << 4),
+	PROP_EVENT_APPLY			= (1 << 5),
+	PROP_EVENT_REGISTER		= (1 << 6)
 };
 
 #define PROP_EVENT_NONE		(0)
 #define PROP_EVENT_READ		(PROP_EVENT_GET		| PROP_EVENT_SAVE)
-#define PROP_EVENT_WRITE	(PROP_EVENT_SET		| PROP_EVENT_RESTORE)
+#define PROP_EVENT_WRITE	(PROP_EVENT_SET		| PROP_EVENT_RESTORE	| PROP_EVENT_APPLY)
 #define PROP_EVENT_RW			(PROP_EVENT_READ	| PROP_EVENT_WRITE)
-#define PROP_EVENT_ALL		(PROP_EVENT_RW		| PROP_EVENT_REGISTER)
+#define PROP_EVENT_ALL		(PROP_EVENT_RW		| PROP_EVENT_REGISTER	| PROP_EVENT_STASH)
 
 struct _props_scale_point_t {
 	const char *label;
@@ -189,6 +192,16 @@ struct _props_t {
 	void *data;
 
 	props_type_t types [PROPS_TYPE_N];
+
+	struct {
+		LV2_Atom_Forge forge;
+		LV2_Atom_Forge_Frame frame;
+		LV2_Atom_Forge_Ref ref;
+		union {
+			LV2_Atom_Object obj;
+			uint8_t buf [PROPS_STASH_SIZE];
+		};
+	} stash;
 
 	unsigned max_size;
 	unsigned max_nimpls;
@@ -421,7 +434,7 @@ _type_qsort(props_type_t *a, unsigned n)
 {
 	if(n < 2)
 		return;
-	
+
 	const props_type_t *p = &a[n/2];
 
 	unsigned i, j;
@@ -472,7 +485,7 @@ _impl_qsort(props_impl_t *a, unsigned n)
 {
 	if(n < 2)
 		return;
-	
+
 	const props_impl_t *p = &a[n/2];
 
 	unsigned i, j;
@@ -568,13 +581,28 @@ _props_set_spin(props_t *props, props_impl_t *impl, LV2_URID type, const void *v
 	_impl_unlock(impl);
 }
 
-static inline void
+static inline bool
 _props_set_try(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
 {
 	if(_impl_try_lock(impl))
+	{
 		impl->type->set_cb(props, impl->value, type, value);
 
-	_impl_unlock(impl);
+		_impl_unlock(impl);
+
+		return true;
+	}
+
+	// stash
+	if(type == impl->type->urid)
+	{
+		if(props->stash.ref)
+			props->stash.ref = lv2_atom_forge_key(&props->stash.forge, impl->property);
+		if(props->stash.ref)
+			props->stash.ref = impl->type->get_cb(&props->stash.forge, value);
+	} //TODO handle similar types, report buffer overflow
+
+	return false;
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -888,6 +916,11 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	assert(ptr == PROPS_TYPE_N);
 	_type_qsort(props->types, PROPS_TYPE_N);
 
+	lv2_atom_forge_init(&props->stash.forge, map);
+	lv2_atom_forge_set_buffer(&props->stash.forge, props->stash.buf, PROPS_STASH_SIZE);
+	props->stash.ref =
+		lv2_atom_forge_object(&props->stash.forge, &props->stash.frame, 0, 0);
+
 	return 1;
 }
 
@@ -940,6 +973,44 @@ static inline int
 props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	const LV2_Atom_Object *obj, LV2_Atom_Forge_Ref *ref)
 {
+	// apply stash
+	if(props->stash.obj.atom.size > sizeof(LV2_Atom_Object_Body))
+	{
+		bool remaining = false;
+
+		LV2_ATOM_OBJECT_FOREACH(&props->stash.obj, prop)
+		{
+			if(prop->key == 0)
+				continue; // already handled
+
+			props_impl_t *impl = _props_impl_search(props, prop->key);
+			if(!impl)
+				continue;
+
+			if(_impl_try_lock(impl))
+			{
+				impl->type->set_cb(props, impl->value,
+					prop->value.type, LV2_ATOM_BODY_CONST(&prop->value));
+
+				_impl_unlock(impl);
+
+				if(impl->event_cb && (impl->event_mask & PROP_EVENT_APPLY) )
+					impl->event_cb(props->data, forge, frames, PROP_EVENT_APPLY, impl);
+
+				prop->key = 0; // invalidate
+			}
+			else
+				remaining = true;
+		}
+
+		if(!remaining)
+		{
+			lv2_atom_forge_set_buffer(&props->stash.forge, props->stash.buf, PROPS_STASH_SIZE);
+			props->stash.ref =
+				lv2_atom_forge_object(&props->stash.forge, &props->stash.frame, 0, 0);
+		}
+	}
+
 	if(!lv2_atom_forge_is_object_type(forge, obj->atom.type))
 		return 0;
 
@@ -1027,9 +1098,14 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		props_impl_t *impl = _props_impl_search(props, property->body);
 		if(impl && (impl->access == props->urid.patch_writable) )
 		{
-			_props_set_try(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
-			if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
-				impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
+			const props_event_t et = _props_set_try(props, impl,
+				value->type, LV2_ATOM_BODY_CONST(value))
+			? PROP_EVENT_SET
+			: PROP_EVENT_STASH;
+
+			if(impl->event_cb && (impl->event_mask & et) )
+				impl->event_cb(props->data, forge, frames, et, impl);
+
 			return 1;
 		}
 	}
@@ -1066,9 +1142,13 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			props_impl_t *impl = _props_impl_search(props, property);
 			if(impl && (impl->access == props->urid.patch_writable) )
 			{
-				_props_set_try(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
-				if(impl->event_cb && (impl->event_mask & PROP_EVENT_SET) )
-					impl->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
+				const props_event_t et = _props_set_try(props, impl,
+					value->type, LV2_ATOM_BODY_CONST(value))
+				? PROP_EVENT_SET
+				: PROP_EVENT_STASH;
+
+				if(impl->event_cb && (impl->event_mask & et) )
+					impl->event_cb(props->data, forge, frames, et, impl);
 			}
 		}
 		return 1;
@@ -1109,7 +1189,10 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 	for(unsigned i = 0; features[i]; i++)
 	{
 		if(!strcmp(features[i]->URI, LV2_STATE__mapPath))
+		{
 			map_path = features[i]->data;
+			break;
+		}
 	}
 
 	void *value = malloc(props->max_size); // create memory to store widest value
