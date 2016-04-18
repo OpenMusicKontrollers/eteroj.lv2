@@ -39,7 +39,6 @@ extern "C" {
 
 // definitions
 #define PROPS_TYPE_N 9
-#define PROPS_STASH_SIZE 0x400 //TODO how big?
 
 // unions
 typedef union _props_raw_t props_raw_t;
@@ -71,7 +70,7 @@ typedef LV2_Atom_Forge_Ref (*props_type_get_cb_t)(
 	const void *value);
 
 typedef void (*props_type_set_cb_t)(
-	props_t *props,
+	props_impl_t *impl,
 	void *value,
 	LV2_URID new_type,
 	const void *new_value);
@@ -83,7 +82,6 @@ union _props_raw_t {
 	const double d;				// Double
 	const int32_t b;			// Bool
 	const uint32_t u;			// URID
-	const size_t s;				// String, Path, URI: string length
 	//TODO more types
 };
 
@@ -97,16 +95,14 @@ enum _props_event_t {
 	PROP_EVENT_SET				= (1 << 1),
 	PROP_EVENT_SAVE				= (1 << 2),
 	PROP_EVENT_RESTORE		= (1 << 3),
-	PROP_EVENT_STASH			= (1 << 4),
-	PROP_EVENT_APPLY			= (1 << 5),
-	PROP_EVENT_REGISTER		= (1 << 6)
+	PROP_EVENT_REGISTER		= (1 << 4)
 };
 
 #define PROP_EVENT_NONE		(0)
 #define PROP_EVENT_READ		(PROP_EVENT_GET		| PROP_EVENT_SAVE)
-#define PROP_EVENT_WRITE	(PROP_EVENT_SET		| PROP_EVENT_RESTORE	| PROP_EVENT_APPLY)
+#define PROP_EVENT_WRITE	(PROP_EVENT_SET		| PROP_EVENT_RESTORE)
 #define PROP_EVENT_RW			(PROP_EVENT_READ	| PROP_EVENT_WRITE)
-#define PROP_EVENT_ALL		(PROP_EVENT_RW		| PROP_EVENT_REGISTER	| PROP_EVENT_STASH)
+#define PROP_EVENT_ALL		(PROP_EVENT_RW		| PROP_EVENT_REGISTER)
 
 struct _props_scale_point_t {
 	const char *label;
@@ -114,14 +110,17 @@ struct _props_scale_point_t {
 };
 
 struct _props_def_t {
-	const char *label;
-	const char *comment;
 	const char *property;
+	const char *type;
 	const char *access;
 	const char *unit;
-	const char *type;
 	props_mode_t mode;
+	props_event_t event_mask;
+	props_event_cb_t event_cb;
+	uint32_t max_size;
 
+	const char *label;
+	const char *comment;
 	props_raw_t minimum;
 	props_raw_t maximum;
 	const props_scale_point_t *scale_points;
@@ -139,12 +138,13 @@ struct _props_impl_t {
 	LV2_URID property;
 	LV2_URID access;
 	LV2_URID unit;
+	const props_t *props;
 	const props_type_t *type;
 	const props_def_t *def;
-	props_event_t event_mask;
-	props_event_cb_t event_cb;
 	void *value;
+	void *stash;
 	atomic_flag lock;
+	bool stashing;
 };
 
 struct _props_t {
@@ -193,15 +193,7 @@ struct _props_t {
 
 	props_type_t types [PROPS_TYPE_N];
 
-	struct {
-		LV2_Atom_Forge forge;
-		LV2_Atom_Forge_Frame frame;
-		LV2_Atom_Forge_Ref ref;
-		union {
-			LV2_Atom_Object obj;
-			uint8_t buf [PROPS_STASH_SIZE];
-		};
-	} stash;
+	bool stashing;
 
 	unsigned max_size;
 	unsigned max_nimpls;
@@ -220,12 +212,7 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 
 // rt-safe
 static inline LV2_URID
-props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
-	props_event_cb_t event_cb, void *value);
-
-// rt-safe
-static inline void
-props_sort(props_t *props);
+props_register(props_t *props, const props_def_t *def, void *value, void *stash);
 
 // rt-safe
 static inline int
@@ -233,17 +220,20 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	const LV2_Atom_Object *obj, LV2_Atom_Forge_Ref *ref);
 
 // rt-safe
-static inline bool
-props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void *value);
+static inline void
+props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property,
+	LV2_Atom_Forge_Ref *ref);
 
 // rt-safe
-static inline LV2_Atom_Forge_Ref
-props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property);
+static inline void
+props_stash(props_t *props, LV2_URID property);
 
+// non-rt
 static inline LV2_State_Status
 props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store,
 	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features);
 
+// non-rt
 static inline LV2_State_Status
 props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function retrieve,
 	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features);
@@ -273,6 +263,14 @@ _impl_unlock(props_impl_t *impl)
 	atomic_flag_clear_explicit(&impl->lock, memory_order_release);
 }
 
+static inline uint32_t
+_impl_size_get(props_impl_t *impl)
+{
+	return impl->type->size_cb
+		? impl->type->size_cb(impl->value)
+		: impl->type->size;
+}
+
 static LV2_Atom_Forge_Ref
 _props_int_get_cb(LV2_Atom_Forge *forge, const void *value)
 {
@@ -284,8 +282,10 @@ _props_bool_get_cb(LV2_Atom_Forge *forge, const void *value)
 	return lv2_atom_forge_bool(forge, *(const int32_t *)value);
 }
 static void
-_props_int_set_cb(props_t *props, void *value, LV2_URID new_type, const void *new_value)
+_props_int_set_cb(props_impl_t *impl, void *value,
+	LV2_URID new_type, const void *new_value)
 {
+	const props_t *props = impl->props;
 	int32_t *ref = value;
 
 	if(new_type == props->urid.atom_int)
@@ -309,8 +309,10 @@ _props_long_get_cb(LV2_Atom_Forge *forge, const void *value)
 	return lv2_atom_forge_long(forge, *(const int64_t *)value);
 }
 static void
-_props_long_set_cb(props_t *props, void *value, LV2_URID new_type, const void *new_value)
+_props_long_set_cb(props_impl_t *impl, void *value,
+	LV2_URID new_type, const void *new_value)
 {
+	const props_t *props = impl->props;
 	int64_t *ref = value;
 
 	if(new_type == props->urid.atom_long)
@@ -334,8 +336,10 @@ _props_float_get_cb(LV2_Atom_Forge *forge, const void *value)
 	return lv2_atom_forge_float(forge, *(const float *)value);
 }
 static void
-_props_float_set_cb(props_t *props, void *value, LV2_URID new_type, const void *new_value)
+_props_float_set_cb(props_impl_t *impl, void *value,
+	LV2_URID new_type, const void *new_value)
 {
+	const props_t *props = impl->props;
 	float *ref = value;
 
 	if(new_type == props->urid.atom_float)
@@ -359,8 +363,10 @@ _props_double_get_cb(LV2_Atom_Forge *forge, const void *value)
 	return lv2_atom_forge_double(forge, *(const double *)value);
 }
 static void
-_props_double_set_cb(props_t *props, void *value, LV2_URID new_type, const void *new_value)
+_props_double_set_cb(props_impl_t *impl, void *value,
+	LV2_URID new_type, const void *new_value)
 {
+	const props_t *props = impl->props;
 	double *ref = value;
 
 	if(new_type == props->urid.atom_double)
@@ -384,8 +390,10 @@ _props_urid_get_cb(LV2_Atom_Forge *forge, const void *value)
 	return lv2_atom_forge_urid(forge, *(const uint32_t *)value);
 }
 static void
-_props_urid_set_cb(props_t *props, void *value, LV2_URID new_type, const void *new_value)
+_props_urid_set_cb(props_impl_t *impl, void *value,
+	LV2_URID new_type, const void *new_value)
 {
+	const props_t *props = impl->props;
 	uint32_t *ref = value;
 
 	if(new_type == props->urid.atom_urid)
@@ -424,9 +432,15 @@ _props_uri_get_cb(LV2_Atom_Forge *forge, const void *value)
 	return lv2_atom_forge_uri(forge, (const char *)value, strlen((const char *)value));
 }
 static void
-_props_string_set_cb(props_t *props, void *value, LV2_URID new_type, const void *new_value)
+_props_string_set_cb(props_impl_t *impl, void *value,
+	LV2_URID new_type, const void *new_value)
 {
-	strcpy((char *)value, (const char *)new_value);
+	const props_t *props = impl->props;
+
+	if(  (new_type == props->urid.atom_string)
+		|| (new_type == props->urid.atom_path)
+		|| (new_type == props->urid.atom_uri) )
+		strncpy((char *)value, (const char *)new_value, impl->def->max_size);
 }
 
 static inline void
@@ -572,37 +586,27 @@ _props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 }
 
 static inline void
-_props_set_spin(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
-{
-	_impl_spin_lock(impl);
-
-	impl->type->set_cb(props, impl->value, type, value);
-
-	_impl_unlock(impl);
-}
-
-static inline bool
-_props_set_try(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
+_props_stash(props_t *props, props_impl_t *impl)
 {
 	if(_impl_try_lock(impl))
 	{
-		impl->type->set_cb(props, impl->value, type, value);
+		const uint32_t size = _impl_size_get(impl);
+		memcpy(impl->stash, impl->value, size);
 
 		_impl_unlock(impl);
-
-		return true;
 	}
-
-	// stash
-	if(type == impl->type->urid)
+	else
 	{
-		if(props->stash.ref)
-			props->stash.ref = lv2_atom_forge_key(&props->stash.forge, impl->property);
-		if(props->stash.ref)
-			props->stash.ref = impl->type->get_cb(&props->stash.forge, value);
-	} //TODO handle similar types, report buffer overflow
+		impl->stashing = true;
+		props->stashing= true;
+	}
+}
 
-	return false;
+static inline void
+_props_set(props_t *props, props_impl_t *impl, LV2_URID type, const void *value)
+{
+	impl->type->set_cb(impl, impl->value, type, value);
+	_props_stash(props, impl);
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -916,98 +920,68 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	assert(ptr == PROPS_TYPE_N);
 	_type_qsort(props->types, PROPS_TYPE_N);
 
-	lv2_atom_forge_init(&props->stash.forge, map);
-	lv2_atom_forge_set_buffer(&props->stash.forge, props->stash.buf, PROPS_STASH_SIZE);
-	props->stash.ref =
-		lv2_atom_forge_object(&props->stash.forge, &props->stash.frame, 0, 0);
-
 	return 1;
 }
 
 static inline LV2_URID
-props_register(props_t *props, const props_def_t *def, props_event_t event_mask,
-	props_event_cb_t event_cb, void *value)
+props_register(props_t *props, const props_def_t *def, void *value, void *stash)
 {
 	if(props->nimpls >= props->max_nimpls)
 		return 0;
 
-	if(!def || !def->property || !def->access || !def->type || !value)
+	if(!def || !def->property || !def->access || !def->type || !value || !stash)
 		return 0;
 
 	const LV2_URID type = props->map->map(props->map->handle, def->type);
 	const props_type_t *props_type = _type_bsearch(type, props->types, PROPS_TYPE_N);
+	const LV2_URID property = props->map->map(props->map->handle, def->property);
+	const LV2_URID access = props->map->map(props->map->handle, def->access);
 
-	if(!props_type)
+	if(!props_type || !property || !access)
 		return 0;
 
 	props_impl_t *impl = &props->impls[props->nimpls++];
 
-	impl->property = props->map->map(props->map->handle, def->property);
-	impl->access = props->map->map(props->map->handle, def->access);
+	impl->props = props;
+	impl->property = property;
+	impl->access = access;
 	impl->unit = def->unit ? props->map->map(props->map->handle, def->unit) : 0;
 	impl->type = props_type;
 	impl->def = def;
-	impl->event_mask = event_mask;
-	impl->event_cb = event_cb;
 	impl->value = value;
+	impl->stash = stash;
 	atomic_flag_clear_explicit(&impl->lock, memory_order_relaxed);
 
 	// update maximal value size
 	if(props_type->size && (props_type->size > props->max_size) )
 		props->max_size = props_type->size;
-	else if(def->maximum.s && (def->maximum.s > props->max_size) )
-		props->max_size = def->maximum.s;
+	else if(def->max_size && (def->max_size > props->max_size) )
+		props->max_size = def->max_size;
+	
+	_impl_qsort(props->impls, props->nimpls);
 
 	//TODO register?
 
-	return impl->property;
-}
-
-static inline void
-props_sort(props_t *props)
-{
-	_impl_qsort(props->impls, props->nimpls);
+	return property;
 }
 
 static inline int
 props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	const LV2_Atom_Object *obj, LV2_Atom_Forge_Ref *ref)
 {
-	// apply stash
-	if(props->stash.obj.atom.size > sizeof(LV2_Atom_Object_Body))
+	if(props->stashing)
 	{
-		bool remaining = false;
+		props->stashing = false;
 
-		LV2_ATOM_OBJECT_FOREACH(&props->stash.obj, prop)
+		for(unsigned i = 0; i < props->nimpls; i++)
 		{
-			if(prop->key == 0)
-				continue; // already handled
+			props_impl_t *impl = &props->impls[i];
 
-			props_impl_t *impl = _props_impl_search(props, prop->key);
-			if(!impl)
-				continue;
-
-			if(_impl_try_lock(impl))
+			if(impl->stashing)
 			{
-				impl->type->set_cb(props, impl->value,
-					prop->value.type, LV2_ATOM_BODY_CONST(&prop->value));
-
-				_impl_unlock(impl);
-
-				if(impl->event_cb && (impl->event_mask & PROP_EVENT_APPLY) )
-					impl->event_cb(props->data, forge, frames, PROP_EVENT_APPLY, impl);
-
-				prop->key = 0; // invalidate
+				impl->stashing= false;
+				_props_stash(props, impl);
 			}
-			else
-				remaining = true;
-		}
-
-		if(!remaining)
-		{
-			lv2_atom_forge_set_buffer(&props->stash.forge, props->stash.buf, PROPS_STASH_SIZE);
-			props->stash.ref =
-				lv2_atom_forge_object(&props->stash.forge, &props->stash.frame, 0, 0);
 		}
 	}
 
@@ -1039,19 +1013,20 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			for(unsigned i = 0; i < props->nimpls; i++)
 			{
 				props_impl_t *impl = &props->impls[i];
+				const props_def_t *def = impl->def;
 
 				if(impl->def->mode == PROP_MODE_DYNAMIC)
 				{
 					if(*ref)
 						*ref = _props_reg(props, forge, frames, impl);
-					if(impl->event_cb && (impl->event_mask & PROP_EVENT_REGISTER) )
-						impl->event_cb(props->data, forge, frames, PROP_EVENT_REGISTER, impl);
+					if(def->event_cb && (def->event_mask & PROP_EVENT_REGISTER) )
+						def->event_cb(props->data, forge, frames, PROP_EVENT_REGISTER, impl);
 				}
 
 				if(*ref)
 					*ref = _props_get(props, forge, frames, impl);
-				if(impl->event_cb && (impl->event_mask & PROP_EVENT_GET) )
-					impl->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
+				if(def->event_cb && (def->event_mask & PROP_EVENT_GET) )
+					def->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
 			}
 			return 1;
 		}
@@ -1062,8 +1037,11 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			if(impl)
 			{
 				*ref = _props_get(props, forge, frames, impl);
-				if(impl->event_cb && (impl->event_mask & PROP_EVENT_GET) )
-					impl->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
+
+				const props_def_t *def = impl->def;
+				if(def->event_cb && (def->event_mask & PROP_EVENT_GET) )
+					def->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
+
 				return 1;
 			}
 		}
@@ -1098,13 +1076,11 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		props_impl_t *impl = _props_impl_search(props, property->body);
 		if(impl && (impl->access == props->urid.patch_writable) )
 		{
-			const props_event_t et = _props_set_try(props, impl,
-				value->type, LV2_ATOM_BODY_CONST(value))
-			? PROP_EVENT_SET
-			: PROP_EVENT_STASH;
+			_props_set(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
 
-			if(impl->event_cb && (impl->event_mask & et) )
-				impl->event_cb(props->data, forge, frames, et, impl);
+			const props_def_t *def = impl->def;
+			if(def->event_cb && (def->event_mask & PROP_EVENT_SET) )
+				def->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 
 			return 1;
 		}
@@ -1142,13 +1118,11 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			props_impl_t *impl = _props_impl_search(props, property);
 			if(impl && (impl->access == props->urid.patch_writable) )
 			{
-				const props_event_t et = _props_set_try(props, impl,
-					value->type, LV2_ATOM_BODY_CONST(value))
-				? PROP_EVENT_SET
-				: PROP_EVENT_STASH;
+				_props_set(props, impl, value->type, LV2_ATOM_BODY_CONST(value));
 
-				if(impl->event_cb && (impl->event_mask & et) )
-					impl->event_cb(props->data, forge, frames, et, impl);
+				const props_def_t *def = impl->def;
+				if(def->event_cb && (def->event_mask & PROP_EVENT_SET) )
+					def->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			}
 		}
 		return 1;
@@ -1157,26 +1131,27 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	return 0; // did not handle a patch event
 }
 
-static inline bool
-props_set_writable(props_t *props, LV2_URID property, LV2_URID type, const void *value)
+static inline void
+props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property,
+	LV2_Atom_Forge_Ref *ref)
 {
 	props_impl_t *impl = _props_impl_search(props, property);
 
 	if(impl)
-		return _props_set_try(props, impl, type, value);
-
-	return false;
+	{
+		_props_stash(props, impl);
+		if(*ref)
+			*ref = _props_get(props, forge, frames, impl);
+	}
 }
 
-static inline LV2_Atom_Forge_Ref
-props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID property)
+static inline void
+props_stash(props_t *props, LV2_URID property)
 {
 	props_impl_t *impl = _props_impl_search(props, property);
 
 	if(impl)
-		return _props_get(props, forge, frames, impl);
-
-	return 1; // we have not written anything, ref thus is set to 'good'
+		_props_stash(props, impl);
 }
 
 static inline LV2_State_Status
@@ -1210,11 +1185,8 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 			// create lockfree copy of value, store() may well be blocking
 			_impl_spin_lock(impl);
 
-			uint32_t size = impl->type->size_cb
-				? impl->type->size_cb(impl->value)
-				: impl->type->size;
-
-			memcpy(value, impl->value, size);
+			const uint32_t size = _impl_size_get(impl);
+			memcpy(value, impl->stash, size);
 
 			_impl_unlock(impl);
 
@@ -1235,8 +1207,9 @@ props_save(props_t *props, LV2_Atom_Forge *forge, LV2_State_Store_Function store
 				store(state, impl->property, value, size, impl->type->urid, flags);
 			}
 
-			if(impl->event_cb && (impl->event_mask & PROP_EVENT_SAVE) )
-				impl->event_cb(props->data, forge, 0, PROP_EVENT_SAVE, impl);
+			const props_def_t *def = impl->def;
+			if(def->event_cb && (def->event_mask & PROP_EVENT_SAVE) )
+				def->event_cb(props->data, forge, 0, PROP_EVENT_SAVE, impl);
 		}
 
 		free(value);
@@ -1276,17 +1249,18 @@ props_restore(props_t *props, LV2_Atom_Forge *forge, LV2_State_Retrieve_Function
 				char *absolute = map_path->absolute_path(map_path->handle, value);
 				if(absolute)
 				{
-					_props_set_spin(props, impl, type, absolute);
+					_props_set(props, impl, type, absolute);
 					free(absolute);
 				}
 			}
 			else // !Path
 			{
-				_props_set_spin(props, impl, type, value);
+				_props_set(props, impl, type, value);
 			}
 
-			if(impl->event_cb && (impl->event_mask & PROP_EVENT_RESTORE) )
-				impl->event_cb(props->data, forge, 0, PROP_EVENT_RESTORE, impl);
+			const props_def_t *def = impl->def;
+			if(def->event_cb && (def->event_mask & PROP_EVENT_RESTORE) )
+				def->event_cb(props->data, forge, 0, PROP_EVENT_RESTORE, impl);
 		}
 		else
 		{
