@@ -33,11 +33,12 @@
 #define BUF_SIZE 0x10000
 #define MAX_NPROPS 3
 
-typedef enum _plugstate_t plugstate_t;
+typedef enum _plugenum_t plugenum_t;
+typedef struct _plugstate_t plugstate_t;
 typedef struct _list_t list_t;
 typedef struct _plughandle_t plughandle_t;
 
-enum _plugstate_t {
+enum _plugenum_t {
 	STATE_IDLE					= 0,
 	STATE_READY					= 1,
 	STATE_TIMEDOUT			= 2,
@@ -51,6 +52,12 @@ struct _list_t {
 
 	size_t size;
 	osc_data_t buf [0];
+};
+
+struct _plugstate_t {
+	char osc_url [512];
+	int32_t osc_status;
+	char osc_error [512];
 };
 
 struct _plughandle_t {
@@ -72,9 +79,9 @@ struct _plughandle_t {
 	volatile bool status_updated;
 	volatile bool reconnection_requested;
 	char worker_url [512];
-	char osc_url [512];
-	int32_t osc_status;
-	char osc_error [512];
+
+	plugstate_t state;
+	plugstate_t stash;
 
 	LV2_Log_Log *log;
 	LV2_Log_Logger logger;
@@ -323,8 +330,8 @@ _resolve(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	handle->osc_status = STATE_READY;
-	sprintf(handle->osc_error, "");
+	handle->state.osc_status = STATE_READY;
+	sprintf(handle->state.osc_error, "");
 
 	handle->needs_flushing = true;
 	handle->status_updated = true;
@@ -339,8 +346,8 @@ _timeout(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	handle->osc_status = STATE_TIMEDOUT;
-	sprintf(handle->osc_error, "");
+	handle->state.osc_status = STATE_TIMEDOUT;
+	sprintf(handle->state.osc_error, "");
 
 	handle->status_updated = true;
 
@@ -361,8 +368,8 @@ _error(osc_time_t timestamp, const char *path, const char *fmt,
 	ptr = osc_get_string(ptr, &where);
 	ptr = osc_get_string(ptr, &what);
 
-	handle->osc_status = STATE_ERRORED;
-	sprintf(handle->osc_error, "%s (%s)\n", where, what);
+	handle->state.osc_status = STATE_ERRORED;
+	sprintf(handle->state.osc_error, "%s (%s)\n", where, what);
 
 	handle->status_updated = true;
 
@@ -376,8 +383,8 @@ _connect(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	handle->osc_status = STATE_CONNECTED;
-	sprintf(handle->osc_error, "");
+	handle->state.osc_status = STATE_CONNECTED;
+	sprintf(handle->state.osc_error, "");
 
 	handle->needs_flushing = true;
 	handle->status_updated = true;
@@ -392,8 +399,8 @@ _disconnect(osc_time_t timestamp, const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 
-	handle->osc_status = STATE_READY;
-	sprintf(handle->osc_error, "");
+	handle->state.osc_status = STATE_READY;
+	sprintf(handle->state.osc_error, "");
 
 	handle->status_updated = true;
 
@@ -578,12 +585,26 @@ static const osc_unroll_inject_t inject = {
 	.bundle = _unroll_bundle
 };
 
+static void
+_url_change(plughandle_t *handle, const char *url);
+
+static void
+_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_url_change(handle, impl->value);
+}
+
 static const props_def_t url_def = {
 	.property = ETEROJ_URL_URI,
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_STATIC,
-	.maximum.s = 512 // strlen
+	.max_size = 512,
+	.event_mask = PROP_EVENT_WRITE,
+	.event_cb = _intercept
 };
 
 static const props_def_t status_def = {
@@ -598,23 +619,8 @@ static const props_def_t error_def = {
 	.access = LV2_PATCH__readable,
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_STATIC,
-	.maximum.s = 512 // strlen
+	.max_size = 512,
 };
-
-static void
-_url_change(plughandle_t *handle, const char *url);
-
-static void
-_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
-{
-	plughandle_t *handle = data;
-
-	if(impl->def == &url_def)
-	{
-		_url_change(handle, impl->value);
-	}
-}
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
@@ -675,9 +681,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.send_adv = _data_send_adv;
 	handle->data.driver.free = _data_free;
 
-	strcpy(handle->osc_url, "osc.udp4://localhost:9090");
-	handle->osc_status = STATE_IDLE;
-	strcpy(handle->osc_error, "");
+	handle->state.osc_status = STATE_IDLE;
+	strcpy(handle->state.osc_error, "");
 
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
@@ -685,13 +690,9 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	if(  props_register(&handle->props, &url_def, PROP_EVENT_WRITE, _intercept, &handle->osc_url)
-		&& (handle->uris.eteroj_stat = props_register(&handle->props, &status_def, PROP_EVENT_NONE, NULL, &handle->osc_status))
-		&& (handle->uris.eteroj_err = props_register(&handle->props, &error_def, PROP_EVENT_NONE, NULL, &handle->osc_error)))
-	{
-		props_sort(&handle->props);
-	}
-	else
+	if(  !props_register(&handle->props, &url_def, handle->state.osc_url, handle->stash.osc_url)
+		|| !(handle->uris.eteroj_stat = props_register(&handle->props, &status_def, &handle->state.osc_status, &handle->stash.osc_status))
+		|| !(handle->uris.eteroj_err = props_register(&handle->props, &error_def, handle->state.osc_error, handle->stash.osc_error)))
 	{
 		free(handle);
 		return NULL;
@@ -987,8 +988,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	if(handle->status_updated)
 	{
-		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_stat);
-		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_err);
+		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_stat, &handle->ref);
+		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_err, &handle->ref);
 
 		handle->status_updated = false;
 	}

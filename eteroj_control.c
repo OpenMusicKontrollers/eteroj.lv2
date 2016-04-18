@@ -30,7 +30,16 @@
 #define MIN_VAL 0.0
 #define MAX_VAL 127.0
 
+typedef struct _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
+
+struct _plugstate_t {
+	int32_t learn [MAX_SLOTS];
+	char path [MAX_SLOTS][MAX_STRLEN];
+	double min [MAX_SLOTS];
+	double max [MAX_SLOTS];
+	double raw [MAX_SLOTS];
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
@@ -47,284 +56,19 @@ struct _plughandle_t {
 	float *output [MAX_SLOTS];
 
 	bool learning;
+	plugstate_t state;
+	plugstate_t stash;
 
-	int32_t learn [MAX_SLOTS];
-	char path [MAX_SLOTS][MAX_STRLEN];
-	double min [MAX_SLOTS];
-	double max [MAX_SLOTS];
-	double raw [MAX_SLOTS];
-
-	LV2_URID learn_urid [MAX_SLOTS];
-	LV2_URID path_urid[MAX_SLOTS];
-	LV2_URID min_urid [MAX_SLOTS];
-	LV2_URID max_urid [MAX_SLOTS];
-	LV2_URID raw_urid [MAX_SLOTS];
+	struct {
+		LV2_URID learn [MAX_SLOTS];
+		LV2_URID path[MAX_SLOTS];
+		LV2_URID min [MAX_SLOTS];
+		LV2_URID max [MAX_SLOTS];
+		LV2_URID raw [MAX_SLOTS];
+	} urid;
 
 	float value [MAX_SLOTS];
 	double divider [MAX_SLOTS];
-};
-
-static const props_def_t stat_learn [MAX_SLOTS] = {
-	[0] = {
-		.property = ETEROJ_CONTROL_URI"_learn_1",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[1] = {
-		.property = ETEROJ_CONTROL_URI"_learn_2",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[2] = {
-		.property = ETEROJ_CONTROL_URI"_learn_3",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[3] = {
-		.property = ETEROJ_CONTROL_URI"_learn_4",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[4] = {
-		.property = ETEROJ_CONTROL_URI"_learn_5",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[5] = {
-		.property = ETEROJ_CONTROL_URI"_learn_6",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[6] = {
-		.property = ETEROJ_CONTROL_URI"_learn_7",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	},
-	[7] = {
-		.property = ETEROJ_CONTROL_URI"_learn_8",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Bool,
-		.mode = PROP_MODE_STATIC
-	}
-};
-
-static const props_def_t stat_path [MAX_SLOTS] = {
-	[0] = {
-		.property = ETEROJ_CONTROL_URI"_path_1",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[1] = {
-		.property = ETEROJ_CONTROL_URI"_path_2",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[2] = {
-		.property = ETEROJ_CONTROL_URI"_path_3",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[3] = {
-		.property = ETEROJ_CONTROL_URI"_path_4",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[4] = {
-		.property = ETEROJ_CONTROL_URI"_path_5",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[5] = {
-		.property = ETEROJ_CONTROL_URI"_path_6",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[6] = {
-		.property = ETEROJ_CONTROL_URI"_path_7",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	},
-	[7] = {
-		.property = ETEROJ_CONTROL_URI"_path_8",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__String,
-		.mode = PROP_MODE_STATIC,
-		.maximum.s = MAX_STRLEN
-	}
-};
-
-static const props_def_t stat_min [MAX_SLOTS] = {
-	[0] = {
-		.property = ETEROJ_CONTROL_URI"_min_1",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[1] = {
-		.property = ETEROJ_CONTROL_URI"_min_2",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[2] = {
-		.property = ETEROJ_CONTROL_URI"_min_3",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[3] = {
-		.property = ETEROJ_CONTROL_URI"_min_4",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[4] = {
-		.property = ETEROJ_CONTROL_URI"_min_5",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[5] = {
-		.property = ETEROJ_CONTROL_URI"_min_6",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[6] = {
-		.property = ETEROJ_CONTROL_URI"_min_7",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[7] = {
-		.property = ETEROJ_CONTROL_URI"_min_8",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	}
-};
-
-static const props_def_t stat_max [MAX_SLOTS] = {
-	[0] = {
-		.property = ETEROJ_CONTROL_URI"_max_1",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[1] = {
-		.property = ETEROJ_CONTROL_URI"_max_2",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[2] = {
-		.property = ETEROJ_CONTROL_URI"_max_3",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[3] = {
-		.property = ETEROJ_CONTROL_URI"_max_4",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[4] = {
-		.property = ETEROJ_CONTROL_URI"_max_5",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[5] = {
-		.property = ETEROJ_CONTROL_URI"_max_6",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[6] = {
-		.property = ETEROJ_CONTROL_URI"_max_7",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[7] = {
-		.property = ETEROJ_CONTROL_URI"_max_8",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	}
-};
-
-static const props_def_t stat_raw [MAX_SLOTS] = {
-	[0] = {
-		.property = ETEROJ_CONTROL_URI"_raw_1",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[1] = {
-		.property = ETEROJ_CONTROL_URI"_raw_2",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[2] = {
-		.property = ETEROJ_CONTROL_URI"_raw_3",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[3] = {
-		.property = ETEROJ_CONTROL_URI"_raw_4",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[4] = {
-		.property = ETEROJ_CONTROL_URI"_raw_5",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[5] = {
-		.property = ETEROJ_CONTROL_URI"_raw_6",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[6] = {
-		.property = ETEROJ_CONTROL_URI"_raw_7",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	},
-	[7] = {
-		.property = ETEROJ_CONTROL_URI"_raw_8",
-		.access = LV2_PATCH__writable,
-		.type = LV2_ATOM__Double,
-		.mode = PROP_MODE_STATIC
-	}
 };
 
 static void
@@ -333,52 +77,25 @@ _intercept_learn(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (int32_t *)impl->value  - handle->learn;
+	const int i = (int32_t *)impl->value  - handle->state.learn;
 
-	if(handle->learn[i]) // set to learn
+	if(handle->state.learn[i]) // set to learn
 	{
 		handle->learning = true;
 
-		const double min = MAX_VAL;
-		if(props_set_writable(&handle->props, handle->min_urid[i], forge->Double, &min))
-		{
-			if(handle->ref)
-				handle->ref = props_set(&handle->props, forge, frames, handle->min_urid[i]);
-		}
+		handle->state.min[i] = MAX_VAL;
+		props_set(&handle->props, forge, frames, handle->urid.min[i], &handle->ref);
 
-		const double max = MIN_VAL;
-		if(props_set_writable(&handle->props, handle->max_urid[i], forge->Double, &max))
-		{
-			if(handle->ref)
-				handle->ref = props_set(&handle->props, forge, frames, handle->max_urid[i]);
-		}
-	}
-
-	if(event == PROP_EVENT_APPLY)
-	{
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, impl->property);
-	}
-}
-
-static void
-_intercept_path(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
-{
-	plughandle_t *handle = data;
-
-	if(event == PROP_EVENT_APPLY)
-	{
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, impl->property);
+		handle->state.max[i] = MIN_VAL;
+		props_set(&handle->props, forge, frames, handle->urid.max[i], &handle->ref);
 	}
 }
 
 static inline void
 _update_divider(plughandle_t *handle, int i)
 {
-	if(handle->max[i] != handle->min[i])
-		handle->divider[i] = 1.0 / (handle->max[i] - handle->min[i]);
+	if(handle->state.max[i] != handle->state.min[i])
+		handle->divider[i] = 1.0 / (handle->state.max[i] - handle->state.min[i]);
 	else
 		handle->divider[i] = 1.0;
 }
@@ -386,7 +103,7 @@ _update_divider(plughandle_t *handle, int i)
 static inline void
 _update_value(plughandle_t *handle, int i)
 {
-	handle->value[i] = (handle->raw[i] - handle->min[i]) * handle->divider[i];
+	handle->value[i] = (handle->state.raw[i] - handle->state.min[i]) * handle->divider[i];
 }
 
 static void
@@ -395,15 +112,9 @@ _intercept_min(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (double *)impl->value  - handle->min;
+	const int i = (double *)impl->value  - handle->state.min;
 	_update_divider(handle, i);
 	_update_value(handle, i);
-
-	if(event == PROP_EVENT_APPLY)
-	{
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, impl->property);
-	}
 }
 
 static void
@@ -412,15 +123,9 @@ _intercept_max(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (double *)impl->value  - handle->max;
+	const int i = (double *)impl->value  - handle->state.max;
 	_update_divider(handle, i);
 	_update_value(handle, i);
-
-	if(event == PROP_EVENT_APPLY)
-	{
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, impl->property);
-	}
 }
 
 static void
@@ -429,9 +134,113 @@ _intercept_raw(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (double *)impl->value  - handle->raw;
+	const int i = (double *)impl->value  - handle->state.raw;
 	_update_value(handle, i);
 }
+
+#define STAT_LEARN(NUM) \
+{ \
+	.property = ETEROJ_CONTROL_URI"_learn_"#NUM, \
+	.access = LV2_PATCH__writable, \
+	.type = LV2_ATOM__Bool, \
+	.mode = PROP_MODE_STATIC, \
+	.event_mask = PROP_EVENT_WRITE, \
+	.event_cb = _intercept_learn \
+}
+
+static const props_def_t stat_learn [MAX_SLOTS] = {
+	[0] = STAT_LEARN(1),
+	[1] = STAT_LEARN(2),
+	[2] = STAT_LEARN(3),
+	[3] = STAT_LEARN(4),
+	[4] = STAT_LEARN(5),
+	[5] = STAT_LEARN(6),
+	[6] = STAT_LEARN(7),
+	[7] = STAT_LEARN(8)
+};
+
+#define STAT_PATH(NUM) \
+{ \
+	.property = ETEROJ_CONTROL_URI"_path_"#NUM, \
+	.access = LV2_PATCH__writable, \
+	.type = LV2_ATOM__String, \
+	.mode = PROP_MODE_STATIC, \
+	.max_size = MAX_STRLEN \
+}
+
+static const props_def_t stat_path [MAX_SLOTS] = {
+	[0] = STAT_PATH(1),
+	[1] = STAT_PATH(2),
+	[2] = STAT_PATH(3),
+	[3] = STAT_PATH(4),
+	[4] = STAT_PATH(5),
+	[5] = STAT_PATH(6),
+	[6] = STAT_PATH(7),
+	[7] = STAT_PATH(7)
+};
+
+#define STAT_MIN(NUM) \
+{ \
+	.property = ETEROJ_CONTROL_URI"_min_"#NUM, \
+	.access = LV2_PATCH__writable, \
+	.type = LV2_ATOM__Double, \
+	.mode = PROP_MODE_STATIC, \
+	.event_mask = PROP_EVENT_WRITE, \
+	.event_cb = _intercept_min \
+}
+
+static const props_def_t stat_min [MAX_SLOTS] = {
+	[0] = STAT_MIN(1),
+	[1] = STAT_MIN(2),
+	[2] = STAT_MIN(3),
+	[3] = STAT_MIN(4),
+	[4] = STAT_MIN(5),
+	[5] = STAT_MIN(6),
+	[6] = STAT_MIN(7),
+	[7] = STAT_MIN(8)
+};
+
+#define STAT_MAX(NUM) \
+{ \
+	.property = ETEROJ_CONTROL_URI"_max_"#NUM, \
+	.access = LV2_PATCH__writable, \
+	.type = LV2_ATOM__Double, \
+	.mode = PROP_MODE_STATIC, \
+	.event_mask = PROP_EVENT_WRITE, \
+	.event_cb = _intercept_max \
+}
+
+static const props_def_t stat_max [MAX_SLOTS] = {
+	[0] = STAT_MAX(1),
+	[1] = STAT_MAX(2),
+	[2] = STAT_MAX(3),
+	[3] = STAT_MAX(4),
+	[4] = STAT_MAX(5),
+	[5] = STAT_MAX(6),
+	[6] = STAT_MAX(7),
+	[7] = STAT_MAX(8)
+};
+
+#define STAT_RAW(NUM) \
+{ \
+	.property = ETEROJ_CONTROL_URI"_raw_"#NUM, \
+	.access = LV2_PATCH__writable, \
+	.type = LV2_ATOM__Double, \
+	.mode = PROP_MODE_STATIC, \
+	.event_mask = PROP_EVENT_RESTORE, \
+	.event_cb = _intercept_raw \
+}
+
+static const props_def_t stat_raw [MAX_SLOTS] = {
+	[0] = STAT_RAW(1),
+	[1] = STAT_RAW(2),
+	[2] = STAT_RAW(3),
+	[3] = STAT_RAW(4),
+	[4] = STAT_RAW(5),
+	[5] = STAT_RAW(6),
+	[6] = STAT_RAW(7),
+	[7] = STAT_RAW(8)
+};
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
@@ -467,27 +276,23 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	bool success = true;
 	for(unsigned i=0; i<MAX_SLOTS; i++)
 	{
-		handle->learn_urid[i] = props_register(&handle->props, &stat_learn[i],
-			PROP_EVENT_WRITE, _intercept_learn, &handle->learn[i]);
-		handle->path_urid[i] = props_register(&handle->props, &stat_path[i],
-			PROP_EVENT_APPLY, _intercept_path, handle->path[i]);
-		handle->min_urid[i] = props_register(&handle->props, &stat_min[i],
-			PROP_EVENT_WRITE, _intercept_min, &handle->min[i]);
-		handle->max_urid[i] = props_register(&handle->props, &stat_max[i],
-			PROP_EVENT_WRITE, _intercept_max, &handle->max[i]);
-		handle->raw_urid[i] = props_register(&handle->props, &stat_raw[i],
-			PROP_EVENT_RESTORE | PROP_EVENT_APPLY, _intercept_raw, &handle->raw[i]);
+		handle->urid.learn[i] = props_register(&handle->props, &stat_learn[i],
+			&handle->state.learn[i], &handle->stash.learn[i]);
+		handle->urid.path[i] = props_register(&handle->props, &stat_path[i],
+			handle->state.path[i], handle->stash.path[i]);
+		handle->urid.min[i] = props_register(&handle->props, &stat_min[i],
+			&handle->state.min[i], &handle->stash.min[i]);
+		handle->urid.max[i] = props_register(&handle->props, &stat_max[i],
+			&handle->state.max[i], &handle->stash.max[i]);
+		handle->urid.raw[i] = props_register(&handle->props, &stat_raw[i],
+			&handle->state.raw[i], &handle->stash.raw[i]);
 
-		if(  !handle->learn_urid[i] || !handle->path_urid[i]
-			|| !handle->min_urid[i] || !handle->max_urid[i] || !handle->raw_urid[i])
+		if(  !handle->urid.learn[i] || !handle->urid.path[i]
+			|| !handle->urid.min[i] || !handle->urid.max[i] || !handle->urid.raw[i])
 			success = false;
 	}
 
-	if(success)
-	{
-		props_sort(&handle->props);
-	}
-	else
+	if(!success)
 	{
 		free(handle);
 		return NULL;
@@ -549,20 +354,13 @@ _message(const char *path, const char *fmt, const LV2_Atom_Tuple *body, void *da
 	{
 		for(unsigned i=0; i<MAX_SLOTS; i++)
 		{
-			if(handle->learn[i])
+			if(handle->state.learn[i])
 			{
-				const int32_t _false = false;
-				if(props_set_writable(&handle->props, handle->learn_urid[i], forge->Int, &_false))
-				{
-					if(handle->ref)
-						handle->ref = props_set(&handle->props, forge, frames, handle->learn_urid[i]);
-				}
+				handle->state.learn[i] = false;
+				props_set(&handle->props, forge, frames, handle->urid.learn[i], &handle->ref);
 
-				if(props_set_writable(&handle->props, handle->path_urid[i], forge->String, path))
-				{
-					if(handle->ref)
-						handle->ref = props_set(&handle->props, forge, frames, handle->path_urid[i]);
-				}
+				strncpy(handle->state.path[i], path, MAX_STRLEN);
+				props_set(&handle->props, forge, frames, handle->urid.path[i], &handle->ref);
 			}
 		}
 
@@ -571,36 +369,27 @@ _message(const char *path, const char *fmt, const LV2_Atom_Tuple *body, void *da
 
 	for(unsigned i=0; i<MAX_SLOTS; i++)
 	{
-		if(!strncmp(path, handle->path[i], MAX_STRLEN))
+		if(!strncmp(path, handle->state.path[i], MAX_STRLEN))
 		{
 			const double value = _value(fmt, body, &handle->forge);
 
-			if(value < handle->min[i])
+			if(value < handle->state.min[i])
 			{
-				if(props_set_writable(&handle->props, handle->min_urid[i], forge->Double, &value))
-				{
-					_update_divider(handle, i);
-
-					if(handle->ref)
-						handle->ref = props_set(&handle->props, forge, frames, handle->min_urid[i]);
-				}
+				handle->state.min[i] = value;
+				_update_divider(handle, i);
+				props_set(&handle->props, forge, frames, handle->urid.min[i], &handle->ref);
 			}
 
-			if(value > handle->max[i])
+			if(value > handle->state.max[i])
 			{
-				if(props_set_writable(&handle->props, handle->max_urid[i], forge->Double, &value))
-				{
-					_update_divider(handle, i);
-
-					if(handle->ref)
-						handle->ref = props_set(&handle->props, forge, frames, handle->max_urid[i]);
-				}
+				handle->state.max[i] = value;
+				_update_divider(handle, i);
+				props_set(&handle->props, forge, frames, handle->urid.max[i], &handle->ref);
 			}
 
-			if(props_set_writable(&handle->props, handle->raw_urid[i], forge->Double, &value))
-			{
-				_update_value(handle, i);
-			}
+			handle->state.raw[i] = value;
+			_update_value(handle, i);
+			props_stash(&handle->props, handle->urid.raw[i]);
 		}
 	}
 }
