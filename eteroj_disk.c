@@ -27,12 +27,14 @@
 #include <props.h>
 #include <osc.h>
 
+#define MAX_STRLEN 1024
 #define BUF_SIZE 0x10000
 #define DEFAULT_FILE_NAME "seq.osc"
 #define MAX_NPROPS 2
 
 typedef enum _jobtype_t jobtype_t;
 typedef struct _job_t job_t;
+typedef struct _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
 
 enum _jobtype_t {
@@ -51,6 +53,11 @@ struct _job_t {
 	};
 };
 
+struct _plugstate_t {
+	int32_t record;
+	char path [MAX_STRLEN];
+};
+
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_Atom_Forge forge;
@@ -66,7 +73,6 @@ struct _plughandle_t {
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
-	int32_t record;
 
 	LV2_Log_Log *log;
 	LV2_Log_Logger logger;
@@ -77,7 +83,9 @@ struct _plughandle_t {
 	bool rolling;
 	int draining;
 
-	char path [1024];
+	plugstate_t state;
+	plugstate_t stash;
+
 	FILE *io;
 
 	double seek_beats;
@@ -96,11 +104,92 @@ struct _plughandle_t {
 	osc_data_t *bndl [32]; // 32 nested bundles should be enough
 };
 
+static inline LV2_Worker_Status
+_trigger_job(plughandle_t *handle, const job_t *job)
+{
+	return handle->sched->schedule_work(handle->sched->handle, sizeof(job_t), job);
+}
+
+static inline LV2_Worker_Status
+_trigger_record(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_RECORD
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_play(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_PLAY
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_seek(plughandle_t *handle, double beats)
+{
+	const job_t job = {
+		.type = JOB_SEEK,
+		.beats = beats
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_open_play(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_OPEN_PLAY
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_open_record(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_OPEN_RECORD
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static inline LV2_Worker_Status
+_trigger_drain(plughandle_t *handle)
+{
+	const job_t job = {
+		.type = JOB_DRAIN
+	};
+
+	return _trigger_job(handle, &job);
+}
+
+static void
+_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	if(handle->state.record)
+		_trigger_open_record(handle);
+	else
+		_trigger_open_play(handle);
+}
+
 static const props_def_t record_def = {
 	.property = ETEROJ_DISK_RECORD_URI,
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__Bool,
-	.mode = PROP_MODE_STATIC
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_WRITE,
+	.event_cb = _intercept
 };
 
 static const props_def_t path_def = {
@@ -108,7 +197,7 @@ static const props_def_t path_def = {
 	.access = LV2_PATCH__readable,
 	.type = LV2_ATOM__Path,
 	.mode = PROP_MODE_STATIC,
-	.maximum.i = 1024
+	.max_size = MAX_STRLEN 
 };
 
 static inline void
@@ -366,73 +455,6 @@ _message_cb(const char *path, const char *fmt,
 	handle->ptr = ptr;
 }
 
-static inline LV2_Worker_Status
-_trigger_job(plughandle_t *handle, const job_t *job)
-{
-	return handle->sched->schedule_work(handle->sched->handle, sizeof(job_t), job);
-}
-
-static inline LV2_Worker_Status
-_trigger_record(plughandle_t *handle)
-{
-	const job_t job = {
-		.type = JOB_RECORD
-	};
-
-	return _trigger_job(handle, &job);
-}
-
-static inline LV2_Worker_Status
-_trigger_play(plughandle_t *handle)
-{
-	const job_t job = {
-		.type = JOB_PLAY
-	};
-
-	return _trigger_job(handle, &job);
-}
-
-static inline LV2_Worker_Status
-_trigger_seek(plughandle_t *handle, double beats)
-{
-	const job_t job = {
-		.type = JOB_SEEK,
-		.beats = beats
-	};
-
-	return _trigger_job(handle, &job);
-}
-
-static inline LV2_Worker_Status
-_trigger_open_play(plughandle_t *handle)
-{
-	const job_t job = {
-		.type = JOB_OPEN_PLAY
-	};
-
-	return _trigger_job(handle, &job);
-}
-
-static inline LV2_Worker_Status
-_trigger_open_record(plughandle_t *handle)
-{
-	const job_t job = {
-		.type = JOB_OPEN_RECORD
-	};
-
-	return _trigger_job(handle, &job);
-}
-
-static inline LV2_Worker_Status
-_trigger_drain(plughandle_t *handle)
-{
-	const job_t job = {
-		.type = JOB_DRAIN
-	};
-
-	return _trigger_job(handle, &job);
-}
-
 static inline void
 _play(plughandle_t *handle, int64_t to, uint32_t capacity)
 {
@@ -541,25 +563,10 @@ _cb(timely_t *timely, int64_t frames, LV2_URID type, void *data)
 	{
 		double beats = _beats(&handle->timely);
 
-		if(handle->record)
+		if(handle->state.record)
 			_reposition_rec(handle, beats);
 		else
 			_reposition_play(handle, beats);
-	}
-}
-
-static void
-_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
-{
-	plughandle_t *handle = data;
-
-	if(impl->def == &record_def)
-	{
-		if(handle->record)
-			_trigger_open_record(handle);
-		else
-			_trigger_open_play(handle);
 	}
 }
 
@@ -624,13 +631,13 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	char *tmp = make_path->path(make_path->handle, DEFAULT_FILE_NAME);
 	if(tmp)
 	{
-		strncpy(handle->path, tmp, 1024);
+		strncpy(handle->state.path, tmp, MAX_STRLEN);
 		free(tmp);
 	
-		if(access(handle->path, F_OK)) // does not yet exist
+		if(access(handle->state.path, F_OK)) // does not yet exist
 		{
 			fprintf(stderr, "touching file\n");
-			handle->io = fopen(handle->path, "w");
+			handle->io = fopen(handle->state.path, "w");
 			if(handle->io)
 			{
 				fclose(handle->io);
@@ -652,12 +659,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	if(  props_register(&handle->props, &record_def, PROP_EVENT_WRITE, _intercept, &handle->record)
-		&& props_register(&handle->props, &path_def, PROP_EVENT_NONE, NULL, &handle->path)) //FIXME
-	{
-		props_sort(&handle->props);
-	}
-	else
+	if(  !props_register(&handle->props, &record_def, &handle->state.record, &handle->stash.record)
+		|| !props_register(&handle->props, &path_def, handle->state.path, handle->stash.path))
 	{
 		free(handle);
 		return NULL;
@@ -718,10 +721,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &ref);
 		handle->beats_upper = _beats(&handle->timely);
 
-		if(handle->record && !time_event && handle->rolling)
+		if(handle->state.record && !time_event && handle->rolling)
 			_rec(handle, ev); // dont' record time position signals
 	
-		if(!handle->record && handle->rolling)
+		if(!handle->state.record && handle->rolling)
 			_play(handle, ev->time.frames, capacity);
 
 		last_t = ev->time.frames;
@@ -730,13 +733,13 @@ run(LV2_Handle instance, uint32_t nsamples)
 	timely_advance(&handle->timely, NULL, last_t, nsamples);
 	handle->beats_upper = _beats(&handle->timely);
 
-	if(!handle->record && handle->rolling)
+	if(!handle->state.record && handle->rolling)
 		_play(handle, nsamples, capacity);
 
 	// trigger post triggers
 	if(handle->rolling)
 	{
-		if(handle->record)
+		if(handle->state.record)
 			_trigger_record(handle);
 		else
 			_trigger_play(handle);
@@ -961,10 +964,10 @@ _work(LV2_Handle instance,
 		case JOB_OPEN_PLAY:
 		{
 			if(handle->log)
-				lv2_log_note(&handle->logger, "open for playback: %s", handle->path);
+				lv2_log_note(&handle->logger, "open for playback: %s", handle->state.path);
 			if(handle->io)
 				fclose(handle->io);
-			if(!(handle->io = fopen(handle->path, "r+")) && handle->log)
+			if(!(handle->io = fopen(handle->state.path, "r+")) && handle->log)
 				lv2_log_error(&handle->logger, "failed to open file.");
 
 			break;
@@ -972,10 +975,10 @@ _work(LV2_Handle instance,
 		case JOB_OPEN_RECORD:
 		{
 			if(handle->log)
-				lv2_log_note(&handle->logger, "open for recording: %s", handle->path);
+				lv2_log_note(&handle->logger, "open for recording: %s", handle->state.path);
 			if(handle->io)
 				fclose(handle->io);
-			if(!(handle->io = fopen(handle->path, "w+")) && handle->log)
+			if(!(handle->io = fopen(handle->state.path, "w+")) && handle->log)
 				lv2_log_error(&handle->logger, "failed to open file.");
 
 			break;

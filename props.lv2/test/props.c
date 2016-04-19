@@ -27,7 +27,28 @@
 #define MAX_NPROPS 32
 #define MAX_STRLEN 256
 
+typedef struct _plugstate0_t plugstate0_t;
+typedef struct _plugstate1_t plugstate1_t;
 typedef struct _plughandle_t plughandle_t;
+
+struct _plugstate0_t {
+	int32_t val1;
+	int64_t val2;
+	float val3;
+	double val4;
+	int32_t val5;
+	int32_t val6;
+	char val7 [MAX_STRLEN];
+};
+
+struct _plugstate1_t {
+	int32_t val1;
+	int64_t val2;
+	float val3;
+	double val4;
+	char val5 [MAX_STRLEN];
+	char val6 [MAX_STRLEN];
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
@@ -40,24 +61,11 @@ struct _plughandle_t {
 
 	PROPS_T(props, MAX_NPROPS);
 
-	struct {
-		int32_t val1;
-		int64_t val2;
-		float val3;
-		double val4;
-		int32_t val5;
-		int32_t val6;
-		char val7 [MAX_STRLEN];
-	} dyn;
+	plugstate0_t dyn;
+	plugstate0_t _dyn;
 
-	struct {
-		int32_t val1;
-		int64_t val2;
-		float val3;
-		double val4;
-		char val5 [MAX_STRLEN];
-		char val6 [MAX_STRLEN];
-	} stat;
+	plugstate1_t stat;
+	plugstate1_t _stat;
 
 	struct {
 		LV2_URID stat2;
@@ -68,145 +76,6 @@ struct _plughandle_t {
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
-};
-
-static const props_def_t dyn1 = {
-	.label = "Int",
-	.comment = "This is a 32-bit integer",
-	.property = PROPS_PREFIX"Int",
-	.access = LV2_PATCH__writable,
-	.unit = LV2_UNITS__hz,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.i = 0,
-	.maximum.i = 10
-};
-
-static const props_def_t dyn2 = {
-	.label = "Long",
-	.comment = "This is a 64-bit integer",
-	.property = PROPS_PREFIX"Long",
-	.access = LV2_PATCH__readable,
-	.unit = LV2_UNITS__khz,
-	.type = LV2_ATOM__Long,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.h = 0,
-	.maximum.h = 20
-};
-
-static const props_def_t dyn3 = {
-	.label = "Float",
-	.comment = "This is a 32-bit floating point",
-	.property = PROPS_PREFIX"Float",
-	.access = LV2_PATCH__writable,
-	.unit = LV2_UNITS__mhz,
-	.type = LV2_ATOM__Float,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.f = -0.5f,
-	.maximum.f = 0.5f
-};
-
-static const props_def_t dyn4 = {
-	.label = "Double",
-	.comment = "This is a 64-bit floating point",
-	.property = PROPS_PREFIX"Double",
-	.access = LV2_PATCH__readable,
-	.unit = LV2_UNITS__db,
-	.type = LV2_ATOM__Double,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.d = -1.0,
-	.maximum.d = 1.0
-};
-
-static const props_scale_point_t scale_points5 [] = {
-	{.label = "One",		.value.i = 0},
-	{.label = "Two",		.value.i = 1},
-	{.label = "Three",	.value.i = 2},
-	{.label = "Four",		.value.i = 3},
-	{.label = NULL } // sentinel
-};
-
-static const props_def_t dyn5 = {
-	.label = "scaleInt",
-	.comment = "This is a 32-bit integer enumeration",
-	.property = PROPS_PREFIX"scaleInt",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.i = 0,
-	.maximum.i = 3,
-	.scale_points = scale_points5
-};
-
-static const props_def_t dyn6 = {
-	.label = "Bool",
-	.comment = "This is a boolean",
-	.property = PROPS_PREFIX"Bool",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Bool,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.d = 0,
-	.maximum.d = 1
-};
-
-static const props_def_t dyn7 = {
-	.label = "String",
-	.comment = "This is a string",
-	.property = PROPS_PREFIX"String",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_DYNAMIC,
-	.maximum.s = MAX_STRLEN // strlen
-};
-
-static const props_def_t stat1 = {
-	.label = "statInt",
-	.property = PROPS_PREFIX"statInt",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat2 = {
-	.label = "statLong",
-	.property = PROPS_PREFIX"statLong",
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Long,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat3 = {
-	.label = "statFloat",
-	.property = PROPS_PREFIX"statFloat",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Float,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat4 = {
-	.label = "statDouble",
-	.property = PROPS_PREFIX"statDouble",
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Double,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat5 = {
-	.label = "statString",
-	.property = PROPS_PREFIX"statString",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_STATIC,
-	.maximum.s = MAX_STRLEN // strlen
-};
-
-static const props_def_t stat6 = {
-	.label = "statPath",
-	.property = PROPS_PREFIX"statPath",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Path,
-	.mode = PROP_MODE_STATIC,
-	.maximum.s = MAX_STRLEN // strlen
 };
 
 static int
@@ -257,16 +126,6 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 			_log_printf(handle, handle->log_note, "SAVE    : %s", impl->def->label);
 			break;
 		}
-		case PROP_EVENT_STASH:
-		{
-			_log_printf(handle, handle->log_trace, "STASH   : %s", impl->def->label);
-			break;
-		}
-		case PROP_EVENT_APPLY:
-		{
-			_log_printf(handle, handle->log_trace, "APPLY   : %s", impl->def->label);
-			break;
-		}
 		case PROP_EVENT_RESTORE:
 		{
 			_log_printf(handle, handle->log_note, "RESTORE : %s", impl->def->label);
@@ -287,8 +146,7 @@ _intercept_dyn1(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	{
 		handle->dyn.val2 = handle->dyn.val1 * 2;
 
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, handle->urid.dyn2);
+		props_set(&handle->props, forge, frames, handle->urid.dyn2, &handle->ref);
 	}
 }
 
@@ -304,8 +162,7 @@ _intercept_dyn3(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	{
 		handle->dyn.val4 = handle->dyn.val3 * 2;
 
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, handle->urid.dyn4);
+		props_set(&handle->props, forge, frames, handle->urid.dyn4, &handle->ref);
 	}
 }
 
@@ -321,8 +178,7 @@ _intercept_stat1(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	{
 		handle->stat.val2 = handle->stat.val1 * 2;
 
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, handle->urid.stat2);
+		props_set(&handle->props, forge, frames, handle->urid.stat2, &handle->ref);
 	}
 }
 
@@ -338,8 +194,7 @@ _intercept_stat3(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	{
 		handle->stat.val4 = handle->stat.val3 * 2;
 
-		if(handle->ref)
-			handle->ref = props_set(&handle->props, forge, frames, handle->urid.stat4);
+		props_set(&handle->props, forge, frames, handle->urid.stat4, &handle->ref);
 	}
 }
 
@@ -361,6 +216,171 @@ _intercept_stat6(void *data, LV2_Atom_Forge *forge, int64_t frames,
 			fclose(f);
 	}
 }
+
+static const props_def_t dyn1 = {
+	.label = "Int",
+	.comment = "This is a 32-bit integer",
+	.property = PROPS_PREFIX"Int",
+	.access = LV2_PATCH__writable,
+	.unit = LV2_UNITS__hz,
+	.type = LV2_ATOM__Int,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept_dyn1,
+	.minimum.i = 0,
+	.maximum.i = 10
+};
+
+static const props_def_t dyn2 = {
+	.label = "Long",
+	.comment = "This is a 64-bit integer",
+	.property = PROPS_PREFIX"Long",
+	.access = LV2_PATCH__readable,
+	.unit = LV2_UNITS__khz,
+	.type = LV2_ATOM__Long,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.minimum.h = 0,
+	.maximum.h = 20
+};
+
+static const props_def_t dyn3 = {
+	.label = "Float",
+	.comment = "This is a 32-bit floating point",
+	.property = PROPS_PREFIX"Float",
+	.access = LV2_PATCH__writable,
+	.unit = LV2_UNITS__mhz,
+	.type = LV2_ATOM__Float,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept_dyn3,
+	.minimum.f = -0.5f,
+	.maximum.f = 0.5f
+};
+
+static const props_def_t dyn4 = {
+	.label = "Double",
+	.comment = "This is a 64-bit floating point",
+	.property = PROPS_PREFIX"Double",
+	.access = LV2_PATCH__readable,
+	.unit = LV2_UNITS__db,
+	.type = LV2_ATOM__Double,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.minimum.d = -1.0,
+	.maximum.d = 1.0
+};
+
+static const props_scale_point_t scale_points5 [] = {
+	{.label = "One",		.value.i = 0},
+	{.label = "Two",		.value.i = 1},
+	{.label = "Three",	.value.i = 2},
+	{.label = "Four",		.value.i = 3},
+	{.label = NULL } // sentinel
+};
+
+static const props_def_t dyn5 = {
+	.label = "scaleInt",
+	.comment = "This is a 32-bit integer enumeration",
+	.property = PROPS_PREFIX"scaleInt",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Int,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.minimum.i = 0,
+	.maximum.i = 3,
+	.scale_points = scale_points5
+};
+
+static const props_def_t dyn6 = {
+	.label = "Bool",
+	.comment = "This is a boolean",
+	.property = PROPS_PREFIX"Bool",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Bool,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.minimum.d = 0,
+	.maximum.d = 1
+};
+
+static const props_def_t dyn7 = {
+	.label = "String",
+	.comment = "This is a string",
+	.property = PROPS_PREFIX"String",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__String,
+	.mode = PROP_MODE_DYNAMIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.max_size = MAX_STRLEN // strlen
+};
+
+static const props_def_t stat1 = {
+	.label = "statInt",
+	.property = PROPS_PREFIX"statInt",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Int,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept_stat1,
+};
+
+static const props_def_t stat2 = {
+	.label = "statLong",
+	.property = PROPS_PREFIX"statLong",
+	.access = LV2_PATCH__readable,
+	.type = LV2_ATOM__Long,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+};
+
+static const props_def_t stat3 = {
+	.label = "statFloat",
+	.property = PROPS_PREFIX"statFloat",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Float,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept_stat3,
+};
+
+static const props_def_t stat4 = {
+	.label = "statDouble",
+	.property = PROPS_PREFIX"statDouble",
+	.access = LV2_PATCH__readable,
+	.type = LV2_ATOM__Double,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+};
+
+static const props_def_t stat5 = {
+	.label = "statString",
+	.property = PROPS_PREFIX"statString",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__String,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.max_size = MAX_STRLEN // strlen
+};
+
+static const props_def_t stat6 = {
+	.label = "statPath",
+	.property = PROPS_PREFIX"statPath",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Path,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept_stat6,
+	.max_size = MAX_STRLEN // strlen
+};
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
@@ -404,36 +424,29 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->dyn.val1 = 2;
-	handle->dyn.val2 = handle->dyn.val1 * 2;
-	handle->dyn.val3 = 0.2f;
-	handle->dyn.val4 = handle->dyn.val3 * 2;
-	handle->dyn.val5 = 0;
-	handle->dyn.val6 = true;
-	handle->dyn.val7[0] = '\0';
+	plugstate0_t *dyn = &handle->dyn;
+	plugstate0_t *_dyn = &handle->_dyn;
+	plugstate1_t *stat = &handle->stat;
+	plugstate1_t *_stat = &handle->_stat;
 
-	if(  props_register(&handle->props, &dyn1, PROP_EVENT_ALL, _intercept_dyn1, &handle->dyn.val1)
-		&& (handle->urid.dyn2 =
-				props_register(&handle->props, &dyn2, PROP_EVENT_ALL, _intercept, &handle->dyn.val2))
-		&& props_register(&handle->props, &dyn3, PROP_EVENT_ALL, _intercept_dyn3, &handle->dyn.val3)
-		&& (handle->urid.dyn4 =
-				props_register(&handle->props, &dyn4, PROP_EVENT_ALL, _intercept, &handle->dyn.val4))
-		&& props_register(&handle->props, &dyn5, PROP_EVENT_ALL, _intercept, &handle->dyn.val5)
-		&& props_register(&handle->props, &dyn6, PROP_EVENT_ALL, _intercept, &handle->dyn.val6)
-		&& props_register(&handle->props, &dyn7, PROP_EVENT_ALL, _intercept, &handle->dyn.val7)
+	if(  !props_register(&handle->props, &dyn1, &dyn->val1, &_dyn->val1)
+		|| !(handle->urid.dyn2 =
+				props_register(&handle->props, &dyn2, &dyn->val2, &_dyn->val2))
+		|| !props_register(&handle->props, &dyn3, &dyn->val3, &_dyn->val3)
+		|| !(handle->urid.dyn4 =
+				props_register(&handle->props, &dyn4, &dyn->val4, &_dyn->val4))
+		|| !props_register(&handle->props, &dyn5, &dyn->val5, &_dyn->val5)
+		|| !props_register(&handle->props, &dyn6, &dyn->val6, &_dyn->val6)
+		|| !props_register(&handle->props, &dyn7, &dyn->val7, &_dyn->val7)
 
-		&& props_register(&handle->props, &stat1, PROP_EVENT_ALL, _intercept_stat1, &handle->stat.val1)
-		&& (handle->urid.stat2 =
-				props_register(&handle->props, &stat2, PROP_EVENT_ALL, _intercept, &handle->stat.val2))
-		&& props_register(&handle->props, &stat3, PROP_EVENT_ALL, _intercept_stat3, &handle->stat.val3)
-		&& (handle->urid.stat4 =
-				props_register(&handle->props, &stat4, PROP_EVENT_ALL, _intercept, &handle->stat.val4))
-		&& props_register(&handle->props, &stat5, PROP_EVENT_ALL, _intercept, &handle->stat.val5)
-		&& props_register(&handle->props, &stat6, PROP_EVENT_ALL, _intercept_stat6, &handle->stat.val6) )
-	{
-		props_sort(&handle->props);
-	}
-	else
+		|| !props_register(&handle->props, &stat1, &stat->val1, &_stat->val1)
+		|| !(handle->urid.stat2 =
+				props_register(&handle->props, &stat2, &stat->val2, &_stat->val2))
+		|| !props_register(&handle->props, &stat3, &stat->val3, &_stat->val3)
+		|| !(handle->urid.stat4 =
+				props_register(&handle->props, &stat4, &stat->val4, &_stat->val4))
+		|| !props_register(&handle->props, &stat5, &stat->val5, &_stat->val5)
+		|| !props_register(&handle->props, &stat6, &stat->val6, &_stat->val6) )
 	{
 		_log_printf(handle, handle->log_trace, "ERR     : registering");
 		free(handle);

@@ -670,21 +670,21 @@ eteroj:control
 		eteroj:control_path_7 "/control/7" ;
 		eteroj:control_path_8 "/control/8" ;
 
-		eteroj:control_min_1 "0.0"^^xsd:double ;
-		eteroj:control_min_2 "0.0"^^xsd:double ;
-		eteroj:control_min_3 "0.0"^^xsd:double ;
-		eteroj:control_min_4 "0.0"^^xsd:double ;
-		eteroj:control_min_5 "0.0"^^xsd:double ;
-		eteroj:control_min_6 "0.0"^^xsd:double ;
-		eteroj:control_min_7 "0.0"^^xsd:double ;
-		eteroj:control_min_8 "0.0"^^xsd:double ;
+		eteroj:control_min_1 "0.0e0"^^xsd:double ;
+		eteroj:control_min_2 "0.0e0"^^xsd:double ;
+		eteroj:control_min_3 "0.0e0"^^xsd:double ;
+		eteroj:control_min_4 "0.0e0"^^xsd:double ;
+		eteroj:control_min_5 "0.0e0"^^xsd:double ;
+		eteroj:control_min_6 "0.0e0"^^xsd:double ;
+		eteroj:control_min_7 "0.0e0"^^xsd:double ;
+		eteroj:control_min_8 "0.0e0"^^xsd:double ;
 
-		eteroj:control_max_1 "127.0"^^xsd:double ;
-		eteroj:control_max_2 "127.0"^^xsd:double ;
-		eteroj:control_max_3 "127.0"^^xsd:double ;
-		eteroj:control_max_4 "127.0"^^xsd:double ;
-		eteroj:control_max_5 "127.0"^^xsd:double ;
-		eteroj:control_max_6 "127.0"^^xsd:double ;
-		eteroj:control_max_7 "127.0"^^xsd:double ;
-		eteroj:control_max_8 "127.0"^^xsd:double ;
+		eteroj:control_max_1 "127.0e0"^^xsd:double ;
+		eteroj:control_max_2 "127.0e0"^^xsd:double ;
+		eteroj:control_max_3 "127.0e0"^^xsd:double ;
+		eteroj:control_max_4 "127.0e0"^^xsd:double ;
+		eteroj:control_max_5 "127.0e0"^^xsd:double ;
+		eteroj:control_max_6 "127.0e0"^^xsd:double ;
+		eteroj:control_max_7 "127.0e0"^^xsd:double ;
+		eteroj:control_max_8 "127.0e0"^^xsd:double ;
 	] .

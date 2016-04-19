@@ -23,10 +23,15 @@
 #include <lv2_osc.h>
 #include <props.h>
 
-#define DEFAULT_PACK_PATH "/midi"
 #define MAX_NPROPS 1
+#define MAX_STRLEN 512
 
+typedef struct _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
+
+struct _plugstate_t {
+	char pack_path [MAX_STRLEN];
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
@@ -41,7 +46,8 @@ struct _plughandle_t {
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
 
-	char pack_path [512];
+	plugstate_t state;
+	plugstate_t stash;
 
 	int64_t frames;
 	LV2_Atom_Forge_Ref ref;
@@ -52,7 +58,7 @@ static const props_def_t pack_path_def = {
 	.access = LV2_PATCH__writable,
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_STATIC,
-	.maximum.s = 512 // strlen
+	.max_size = MAX_STRLEN
 };
 
 static LV2_Handle
@@ -80,19 +86,13 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	osc_forge_init(&handle->oforge, handle->map);
 	
-	strcpy(handle->pack_path, DEFAULT_PACK_PATH);
-
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
 		free(handle);
 		return NULL;
 	}
 
-	if(props_register(&handle->props, &pack_path_def, PROP_EVENT_NONE, NULL, &handle->pack_path))
-	{
-		props_sort(&handle->props);
-	}
-	else
+	if(!props_register(&handle->props, &pack_path_def, handle->state.pack_path, handle->stash.pack_path))
 	{
 		free(handle);
 		return NULL;
@@ -175,7 +175,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 				if(handle->ref)
 					handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
 				if(handle->ref)
-					handle->ref = osc_forge_message_push(&handle->oforge, forge, frames, handle->pack_path, "m");
+					handle->ref = osc_forge_message_push(&handle->oforge, forge, frames, handle->state.pack_path, "m");
 				if(handle->ref)
 					handle->ref = osc_forge_midi(&handle->oforge, forge, obj->atom.size, LV2_ATOM_BODY_CONST(&obj->atom));
 				if(handle->ref)
