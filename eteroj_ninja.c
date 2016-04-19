@@ -20,31 +20,81 @@
 
 #include <eteroj.h>
 #include <osc.h>
+#include <varchunk.h>
 #include <lv2_osc.h>
 
 #include <sratom/sratom.h>
 
-#define BUF_SIZE 2048
+#define NS_RDF "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+#define BUF_SIZE 8192
 
+typedef struct _atom_ser_t atom_ser_t;
 typedef struct _plughandle_t plughandle_t;
+
+struct _atom_ser_t {
+	uint32_t size;
+	uint8_t *buf;
+	uint32_t offset;
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_URID_Unmap *unmap;
+	LV2_Worker_Schedule *sched;
+
+	atom_ser_t ser;
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
 	LV2_Atom_Forge forge;
 	osc_forge_t oforge;
-	LV2_Atom_Forge_Ref ref;
 	int64_t frames;
 
 	Sratom *sratom;
 	SerdNode subject;
 	SerdNode predicate;
+
+	varchunk_t *to_worker;
+	varchunk_t *from_worker;
 };
 		
 static const char *base_uri = "file:///tmp/base";
+
+static inline LV2_Atom_Forge_Ref
+_sink(LV2_Atom_Forge_Sink_Handle handle, const void *buf, uint32_t size)
+{
+	atom_ser_t *ser = handle;
+
+	const LV2_Atom_Forge_Ref ref = ser->offset + 1;
+
+	const uint32_t new_offset = ser->offset + size;
+	if(new_offset > ser->size)
+	{
+		uint32_t new_size = ser->size << 1;
+		while(new_offset > new_size)
+			new_size <<= 1;
+
+		if(!(ser->buf = realloc(ser->buf, new_size)))
+			return 0; // realloc failed
+
+		ser->size = new_size;
+	}
+
+	memcpy(ser->buf + ser->offset, buf, size);
+	ser->offset = new_offset;
+
+	return ref;
+}
+
+static inline LV2_Atom *
+_deref(LV2_Atom_Forge_Sink_Handle handle, LV2_Atom_Forge_Ref ref)
+{
+	atom_ser_t *ser = handle;
+
+	const uint32_t offset = ref - 1;
+
+	return (LV2_Atom *)(ser->buf + offset);
+}
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
@@ -61,6 +111,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 			handle->map = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
 			handle->unmap = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
+			handle->sched= features[i]->data;
 	}
 
 	if(!handle->map)
@@ -72,6 +124,12 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	if(!handle->unmap)
 	{
 		fprintf(stderr, "%s: Host does not support urid:unmap\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+	if(!handle->sched)
+	{
+		fprintf(stderr, "%s: Host does not support work:schedule\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
@@ -87,7 +145,20 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	handle->subject = serd_node_from_string(SERD_URI, (const uint8_t*)(""));
-	handle->predicate = serd_node_from_string(SERD_URI, (const uint8_t*)(LV2_ATOM__Event));
+	handle->predicate = serd_node_from_string(SERD_URI, (const uint8_t*)(NS_RDF"value"));
+
+	handle->to_worker = varchunk_new(BUF_SIZE, true);
+	handle->from_worker = varchunk_new(BUF_SIZE, true);
+
+	if(!handle->to_worker || !handle->from_worker)
+	{
+		free(handle);
+		return NULL;
+	}
+
+	handle->ser.size = 2018;
+	handle->ser.offset = 0;
+	handle->ser.buf = malloc(handle->ser.size); //TODO check
 
 	return handle;
 }
@@ -116,7 +187,6 @@ _message(const char *path, const char *fmt,
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
-	LV2_Atom_Forge_Ref ref = handle->ref;
 
 	if(strcmp(path, "/ttl") || strcmp(fmt, "s"))
 		return;
@@ -129,15 +199,11 @@ _message(const char *path, const char *fmt,
 		&handle->subject, &handle->predicate, LV2_ATOM_BODY_CONST(itr));
 	if(atom)
 	{
-		if(ref)
-			ref = lv2_atom_forge_frame_time(forge, handle->frames);
-		if(ref)
-			ref = lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
+		lv2_atom_forge_frame_time(forge, handle->frames);
+		lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
 
-		free(atom); //FIXME not rt-safe
+		free(atom);
 	}
-
-	handle->ref = ref;
 }
 
 static void
@@ -147,44 +213,35 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	// prepare osc atom forge
 	const uint32_t capacity = handle->event_out->atom.size;
-	LV2_Atom_Forge *forge = &handle->forge;
-	osc_forge_t *oforge = &handle->oforge;
-	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->event_out, capacity);
-	LV2_Atom_Forge_Frame frame;
-	handle->ref = lv2_atom_forge_sequence_head(forge, &frame, 0);
-	
-	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
+
+	// move input events to worker thread
+	if(handle->event_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
 	{
-		const LV2_Atom *atom = &ev->body;
-		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
-
-		if(osc_atom_is_bundle(oforge, obj) || osc_atom_is_message(oforge, obj))
+		const size_t size = lv2_atom_total_size(&handle->event_in->atom);
+		LV2_Atom_Sequence *seq;
+		if((seq = varchunk_write_request(handle->to_worker, size)))
 		{
-			handle->frames = ev->time.frames;
-			osc_atom_event_unroll(oforge, obj, NULL, NULL, _message, handle);
-		}
-		else
-		{
-			char *ttl = sratom_to_turtle(handle->sratom, handle->unmap, base_uri,
-				&handle->subject, &handle->predicate,
-				atom->type, atom->size, LV2_ATOM_BODY_CONST(atom));
+			memcpy(seq, handle->event_in, size);
+			varchunk_write_advance(handle->to_worker, size);
 
-			if(ttl)
-			{
-				if(handle->ref)
-					handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
-				if(handle->ref)
-					handle->ref = osc_forge_message_vararg(&handle->oforge, forge, "/ttl", "s", ttl);
-
-				free(ttl); //FIXME not rt-safe
-			}
+			const int32_t dummy;
+			handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
 		}
 	}
 
-	if(handle->ref)
-		lv2_atom_forge_pop(forge, &frame);
+	// move output events from worker thread
+	size_t size;
+	const LV2_Atom_Sequence *seq;
+	if((seq = varchunk_read_request(handle->from_worker, &size)))
+	{
+		if(size <= capacity)
+			memcpy(handle->event_out, seq, size);
+		varchunk_read_advance(handle->from_worker);
+	}
 	else
+	{
 		lv2_atom_sequence_clear(handle->event_out);
+	}
 }
 
 static void
@@ -192,9 +249,120 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
+	if(handle->ser.buf)
+		free(handle->ser.buf);
+	if(handle->to_worker)
+		varchunk_free(handle->to_worker);
+	if(handle->from_worker)
+		varchunk_free(handle->from_worker);
 	sratom_free(handle->sratom);
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
+}
+
+// non-rt thread
+static LV2_Worker_Status
+_work(LV2_Handle instance,
+	LV2_Worker_Respond_Function respond,
+	LV2_Worker_Respond_Handle target,
+	uint32_t size,
+	const void *body)
+{
+	plughandle_t *handle = instance;
+	LV2_Atom_Forge *forge = &handle->forge;
+	osc_forge_t *oforge = &handle->oforge;
+
+	(void)respond;
+	(void)target;
+	(void)size;
+	(void)body;
+
+	size_t _size;
+	const LV2_Atom_Sequence *seq;
+	while((seq = varchunk_read_request(handle->to_worker, &_size)))
+	{
+		handle->ser.offset = 0;
+		lv2_atom_forge_set_sink(forge, _sink, _deref, &handle->ser);
+		LV2_Atom_Forge_Frame frame;
+		lv2_atom_forge_sequence_head(forge, &frame, 0);
+
+		LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+		{
+			const LV2_Atom *atom = &ev->body;
+			const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+
+			if(osc_atom_is_bundle(oforge, obj) || osc_atom_is_message(oforge, obj))
+			{
+				handle->frames = ev->time.frames;
+				osc_atom_event_unroll(oforge, obj, NULL, NULL, _message, handle);
+			}
+			else
+			{
+				char *ttl = sratom_to_turtle(handle->sratom, handle->unmap, base_uri,
+					&handle->subject, &handle->predicate,
+					atom->type, atom->size, LV2_ATOM_BODY_CONST(atom));
+
+				if(ttl)
+				{
+					lv2_atom_forge_frame_time(forge, ev->time.frames);
+					osc_forge_message_vararg(&handle->oforge, forge, "/ttl", "s", ttl);
+
+					free(ttl);
+				}
+			}
+		}
+
+		lv2_atom_forge_pop(forge, &frame);
+
+		seq = (const LV2_Atom_Sequence *)handle->ser.buf;
+		if(seq->atom.size > sizeof(LV2_Atom_Sequence_Body))
+		{
+			const size_t len = lv2_atom_total_size(&seq->atom);
+			LV2_Atom_Sequence *dst;
+			if((dst = varchunk_write_request(handle->from_worker, len)))
+			{
+				memcpy(dst, seq, len);
+				varchunk_write_advance(handle->from_worker, len);
+			}
+		}
+
+		varchunk_read_advance(handle->to_worker);
+	}
+
+	return LV2_WORKER_SUCCESS;
+}
+
+// rt-thread
+static LV2_Worker_Status
+_work_response(LV2_Handle instance, uint32_t size, const void *body)
+{
+	// do nothing
+
+	return LV2_WORKER_SUCCESS;
+}
+
+// rt-thread
+static LV2_Worker_Status
+_end_run(LV2_Handle instance)
+{
+	// do nothing
+
+	return LV2_WORKER_SUCCESS;
+}
+
+static const LV2_Worker_Interface work_iface = {
+	.work = _work,
+	.work_response = _work_response,
+	.end_run = _end_run
+};
+
+static const void*
+extension_data(const char* uri)
+{
+	if(!strcmp(uri, LV2_WORKER__interface))
+		return &work_iface;
+
+	return NULL;
 }
 
 const LV2_Descriptor eteroj_ninja = {
@@ -205,5 +373,5 @@ const LV2_Descriptor eteroj_ninja = {
 	.run						= run,
 	.deactivate			= NULL,
 	.cleanup				= cleanup,
-	.extension_data	= NULL
+	.extension_data	= extension_data 
 };

@@ -308,7 +308,7 @@ eteroj:pack
 	state:state [
 		eteroj:pack_path "/midi" ;
 	] .
-
+	
 # Ninja Plugin
 eteroj:ninja
 	a lv2:Plugin,
@@ -316,7 +316,8 @@ eteroj:ninja
 	doap:name "Eteroj Ninja" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap ;
+	lv2:extensionData work:interface ;
+	lv2:requiredFeature urid:map, urid:unmap, work:schedule ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
 
 	# input event port
