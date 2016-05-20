@@ -23,9 +23,9 @@
 #include <eteroj.h>
 #include <timely.h>
 #include <varchunk.h>
-#include <lv2_osc.h>
+#include <osc.lv2/writer.h>
+#include <osc.lv2/forge.h>
 #include <props.h>
-#include <osc.h>
 
 #define MAX_STRLEN 1024
 #define BUF_SIZE 0x10000
@@ -60,8 +60,9 @@ struct _plugstate_t {
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
+	LV2_URID_Unmap *unmap;
 	LV2_Atom_Forge forge;
-	osc_forge_t oforge;
+	LV2_OSC_URID osc_urid;
 	struct {
 		LV2_URID eteroj_drain;
 	} uris;
@@ -95,13 +96,14 @@ struct _plughandle_t {
 
 	int frame_cnt;
 	LV2_Atom_Forge_Frame frame [32][2]; // 32 nested bundles should be enough
+	LV2_Atom_Forge_Ref ref;
 	int64_t offset;
 
-	osc_data_t *ptr;
-	osc_data_t *end;
+	uint8_t *ptr;
+	uint8_t *end;
 
 	int bndl_cnt;
-	osc_data_t *bndl [32]; // 32 nested bundles should be enough
+	uint8_t *bndl [32]; // 32 nested bundles should be enough
 };
 
 static inline LV2_Worker_Status
@@ -209,252 +211,6 @@ _event_ntoh(LV2_Atom_Event *ev)
 }
 #define _event_hton _event_ntoh
 
-// rt
-static void
-_bundle_in(osc_time_t timestamp, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-
-	if(!handle->frame_cnt) // no nested bundle
-		lv2_atom_forge_frame_time(forge, handle->offset);
-
-	osc_forge_bundle_push(&handle->oforge, forge,
-		handle->frame[handle->frame_cnt++], timestamp);
-}
-
-static void
-_bundle_out(osc_time_t timestamp, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-
-	osc_forge_bundle_pop(&handle->oforge, forge,
-		handle->frame[--handle->frame_cnt]);
-}
-
-// rt
-static int
-_message(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-	LV2_Atom_Forge_Frame frame [2];
-
-	const osc_data_t *ptr = buf;
-
-	if(!handle->frame_cnt) // message not in a bundle
-		lv2_atom_forge_frame_time(forge, handle->offset);
-
-	osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
-
-	for(const char *type = fmt; *type; type++)
-		switch(*type)
-		{
-			case 'i':
-			{
-				int32_t i;
-				ptr = osc_get_int32(ptr, &i);
-				osc_forge_int32(&handle->oforge, forge, i);
-				break;
-			}
-			case 'f':
-			{
-				float f;
-				ptr = osc_get_float(ptr, &f);
-				osc_forge_float(&handle->oforge, forge, f);
-				break;
-			}
-			case 's':
-			case 'S':
-			{
-				const char *s;
-				ptr = osc_get_string(ptr, &s);
-				osc_forge_string(&handle->oforge, forge, s);
-				break;
-			}
-			case 'b':
-			{
-				osc_blob_t b;
-				ptr = osc_get_blob(ptr, &b);
-				osc_forge_blob(&handle->oforge, forge, b.size, b.payload);
-				break;
-			}
-
-			case 'h':
-			{
-				int64_t h;
-				ptr = osc_get_int64(ptr, &h);
-				osc_forge_int64(&handle->oforge, forge, h);
-				break;
-			}
-			case 'd':
-			{
-				double d;
-				ptr = osc_get_double(ptr, &d);
-				osc_forge_double(&handle->oforge, forge, d);
-				break;
-			}
-			case 't':
-			{
-				uint64_t t;
-				ptr = osc_get_timetag(ptr, &t);
-				osc_forge_timestamp(&handle->oforge, forge, t);
-				break;
-			}
-
-			case 'T':
-			case 'F':
-			case 'N':
-			case 'I':
-			{
-				break;
-			}
-
-			case 'c':
-			{
-				char c;
-				ptr = osc_get_char(ptr, &c);
-				osc_forge_char(&handle->oforge, forge, c);
-				break;
-			}
-			case 'm':
-			{
-				const uint8_t *m;
-				ptr = osc_get_midi(ptr, &m);
-				osc_forge_midi(&handle->oforge, forge, 3, m + 1); // skip port byte
-				break;
-			}
-		}
-
-	osc_forge_message_pop(&handle->oforge, forge, frame);
-
-	return 1;
-}
-
-static const osc_method_t methods [] = {
-	{NULL, NULL, _message},
-
-	{NULL, NULL, NULL}
-};
-
-// rt
-static void
-_bundle_push_cb(uint64_t timestamp, void *data)
-{
-	plughandle_t *handle = data;
-
-	handle->ptr = osc_start_bundle(handle->ptr, handle->end,
-		timestamp, &handle->bndl[handle->bndl_cnt++]);
-}
-
-// rt
-static void
-_bundle_pop_cb(void *data)
-{
-	plughandle_t *handle = data;
-
-	handle->ptr = osc_end_bundle(handle->ptr, handle->end,
-		handle->bndl[--handle->bndl_cnt]);
-}
-
-// rt
-static void
-_message_cb(const char *path, const char *fmt,
-	const LV2_Atom_Tuple *body, void *data)
-{
-	plughandle_t *handle = data;
-
-	osc_data_t *ptr = handle->ptr;
-	const osc_data_t *end = handle->end;
-
-	osc_data_t *itm;
-	if(handle->bndl_cnt)
-		ptr = osc_start_bundle_item(ptr, end, &itm);
-
-	ptr = osc_set_path(ptr, end, path);
-	ptr = osc_set_fmt(ptr, end, fmt);
-
-	const LV2_Atom *itr = lv2_atom_tuple_begin(body);
-	for(const char *type = fmt;
-		*type && !lv2_atom_tuple_is_end(LV2_ATOM_BODY(body), body->atom.size, itr);
-		type++, itr = lv2_atom_tuple_next(itr))
-	{
-		switch(*type)
-		{
-			case 'i':
-			{
-				ptr = osc_set_int32(ptr, end, ((const LV2_Atom_Int *)itr)->body);
-				break;
-			}
-			case 'f':
-			{
-				ptr = osc_set_float(ptr, end, ((const LV2_Atom_Float *)itr)->body);
-				break;
-			}
-			case 's':
-			case 'S':
-			{
-				ptr = osc_set_string(ptr, end, LV2_ATOM_BODY_CONST(itr));
-				break;
-			}
-			case 'b':
-			{
-				ptr = osc_set_blob(ptr, end, itr->size, LV2_ATOM_BODY(itr));
-				break;
-			}
-
-			case 'h':
-			{
-				ptr = osc_set_int64(ptr, end, ((const LV2_Atom_Long *)itr)->body);
-				break;
-			}
-			case 'd':
-			{
-				ptr = osc_set_double(ptr, end, ((const LV2_Atom_Double *)itr)->body);
-				break;
-			}
-			case 't':
-			{
-				ptr = osc_set_timetag(ptr, end, ((const LV2_Atom_Long *)itr)->body);
-				break;
-			}
-
-			case 'T':
-			case 'F':
-			case 'N':
-			case 'I':
-			{
-				break;
-			}
-
-			case 'c':
-			{
-				ptr = osc_set_char(ptr, end, ((const LV2_Atom_Int *)itr)->body);
-				break;
-			}
-			case 'm':
-			{
-				const uint8_t *src = LV2_ATOM_BODY_CONST(itr);
-				const uint8_t dst [4] = {
-					0x00, // port byte
-					itr->size >= 1 ? src[0] : 0x00,
-					itr->size >= 2 ? src[1] : 0x00,
-					itr->size >= 3 ? src[2] : 0x00
-				};
-				ptr = osc_set_midi(ptr, end, dst);
-				break;
-			}
-		}
-	}
-
-	if(handle->bndl_cnt)
-		ptr = osc_end_bundle_item(ptr, end, itm);
-
-	handle->ptr = ptr;
-}
-
 static inline void
 _play(plughandle_t *handle, int64_t to, uint32_t capacity)
 {
@@ -488,8 +244,11 @@ _play(plughandle_t *handle, int64_t to, uint32_t capacity)
 			handle->offset = 0;
 		}
 
-		osc_dispatch_method(LV2_ATOM_BODY_CONST(&src->body), src->body.size,
-			methods, _bundle_in, _bundle_out, handle);
+		if(handle->ref)
+			handle->ref = lv2_atom_forge_frame_time(&handle->forge, handle->offset);
+		if(handle->ref)
+			handle->ref = lv2_osc_forge_packet(&handle->forge, &handle->osc_urid, handle->map,
+				LV2_ATOM_BODY_CONST(&src->body), src->body.size);
 
 		varchunk_read_advance(handle->from_disk);
 	}
@@ -502,16 +261,14 @@ _rec(plughandle_t *handle, const LV2_Atom_Event *src)
 	LV2_Atom_Event *dst;
 	if((dst = varchunk_write_request(handle->to_disk, sizeof(LV2_Atom_Event) + src->body.size)))
 	{
-		osc_data_t *base = LV2_ATOM_BODY(&dst->body);
-		handle->ptr = base;
-		handle->end = base + src->body.size;
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&src->body;
+		uint8_t *base = LV2_ATOM_BODY(&dst->body);
 
-		osc_atom_event_unroll(&handle->oforge, (const LV2_Atom_Object *)&src->body,
-			_bundle_push_cb, _bundle_pop_cb, _message_cb, handle);
-	
-		uint32_t size = handle->ptr
-			? handle->ptr - base
-			: 0;
+		LV2_OSC_Writer writer;
+		lv2_osc_writer_initialize(&writer, base, src->body.size);
+		lv2_osc_writer_packet(&writer, &handle->osc_urid, handle->unmap, obj->atom.size, &obj->body);
+		size_t size;
+		lv2_osc_writer_finalize(&writer, &size);
 
 		if(size)
 		{
@@ -585,6 +342,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
+			handle->unmap = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_LOG__log))
 			handle->log = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
@@ -593,10 +352,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 			make_path = features[i]->data;
 	}
 
-	if(!handle->map)
+	if(!handle->map || !handle->unmap)
 	{
 		fprintf(stderr,
-			"%s: Host does not support urid:map\n", descriptor->URI);
+			"%s: Host does not support urid:(un)map\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
@@ -626,7 +385,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	if(handle->log)
 		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	osc_forge_init(&handle->oforge, handle->map);
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 
 	char *tmp = make_path->path(make_path->handle, DEFAULT_FILE_NAME);
 	if(tmp)
@@ -708,7 +467,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	LV2_Atom_Forge_Frame frame;
 	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
-	LV2_Atom_Forge_Ref ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+	handle->ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
 
 	handle->beats_period = handle->beats_upper;
 
@@ -718,7 +477,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 		const int time_event = timely_advance(&handle->timely, obj, last_t, ev->time.frames);
 		if(!time_event)
-			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &ref);
+			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref);
 		handle->beats_upper = _beats(&handle->timely);
 
 		if(handle->state.record && !time_event && handle->rolling)
@@ -745,7 +504,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 			_trigger_play(handle);
 	}
 
-	lv2_atom_forge_pop(&handle->forge, &frame);
+	if(handle->ref)
+		lv2_atom_forge_pop(&handle->forge, &frame);
+	else
+		lv2_atom_sequence_clear(handle->event_out);
 }
 
 static void

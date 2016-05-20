@@ -19,8 +19,9 @@
 #include <stdlib.h>
 
 #include <eteroj.h>
-#include <osc.h>
-#include <lv2_osc.h>
+#include <osc.lv2/util.h>
+#include <osc.lv2/writer.h>
+#include <osc.lv2/forge.h>
 
 #define BUF_SIZE 2048
 
@@ -28,19 +29,19 @@ typedef struct _plughandle_t plughandle_t;
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
+	LV2_URID_Unmap *unmap;
 	struct {
 		LV2_URID midi_MidiEvent;
 	} uris;
 
 	int64_t frames;
 	LV2_Atom_Forge_Ref ref;
-	osc_data_t buf [BUF_SIZE];
-	osc_data_t *end;
+	uint8_t buf [BUF_SIZE];
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
 	LV2_Atom_Forge forge;
-	osc_forge_t oforge;
+	LV2_OSC_URID osc_urid;
 };
 
 static LV2_Handle
@@ -55,21 +56,21 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	for(unsigned i=0; features[i]; i++)
 	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
-			handle->map = (LV2_URID_Map *)features[i]->data;
+			handle->map = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
+			handle->unmap = features[i]->data;
 	}
 
-	if(!handle->map)
+	if(!handle->map || !handle->unmap)
 	{
-		fprintf(stderr, "%s: Host does not support urid:map\n", descriptor->URI);
+		fprintf(stderr, "%s: Host does not support urid:(un)map\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
 
 	handle->uris.midi_MidiEvent = handle->map->map(handle->map->handle, LV2_MIDI__MidiEvent);
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	osc_forge_init(&handle->oforge, handle->map);
-
-	handle->end = handle->buf + BUF_SIZE;
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 
 	return handle;
 }
@@ -170,14 +171,14 @@ _osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
 
 	from++; // skip SYSEX_START
 
-	uint32_t path_len = osc_strlen((const char *)from);
+	uint32_t path_len = LV2_OSC_PADDED_SIZE(strlen((const char *)from) + 1);
 	count += path_len;
 
 	if(count > size-6) // SYSEX_START + MIN(fmt_len) + SYSEX_END
 		return 0;
 
 	const uint8_t *fmt = (const uint8_t *)(from + path_len);
-	uint32_t fmt_len = osc_strlen((const char *)fmt);
+	uint32_t fmt_len = LV2_OSC_PADDED_SIZE(strlen((const char *)fmt) + 1);
 	count += fmt_len;
 
 	if(count > size-2) // SYSEX_START + SYSEX_END
@@ -190,25 +191,33 @@ _osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
 	count = 0;
 	for(const uint8_t *type=fmt; *type; type++)
 	{
-		switch(*type)
+		switch( (LV2_OSC_Type)*type)
 		{
-			case 'i':
-			case 'f':
-			case 'm':
+			case LV2_OSC_INT32:
+			case LV2_OSC_FLOAT:
+			case LV2_OSC_MIDI:
+			case LV2_OSC_CHAR:
+			case LV2_OSC_RGBA:
 				count += 4;
 				break;
 
-			case 'h':
-			case 'd':
-			case 't':
+			case LV2_OSC_TRUE:
+			case LV2_OSC_FALSE:
+			case LV2_OSC_NIL:
+			case LV2_OSC_IMPULSE:
+				break;
+
+			case LV2_OSC_INT64:
+			case LV2_OSC_DOUBLE:
+			case LV2_OSC_TIMETAG:
 				count += 8;
 				break;
 
-			case 's':
-			case 'S':
+			case LV2_OSC_STRING:
+			case LV2_OSC_SYMBOL:
 				if(count)
 				{
-					uint32_t cloaked_count = _cloaked_size(count);
+					const uint32_t cloaked_count = _cloaked_size(count);
 
 					_decloak_chunk(to, from, end, cloaked_count);
 
@@ -217,7 +226,7 @@ _osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
 				}
 
 				{
-					count = osc_strlen((const char *)from);
+					count = LV2_OSC_PADDED_SIZE(strlen((const char *)from) + 1);
 
 					memmove((uint8_t *)to, (const uint8_t *)from, count);
 
@@ -228,10 +237,10 @@ _osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
 				}
 				break;
 
-			case 'b':
+			case LV2_OSC_BLOB:
 				if(count)
 				{
-					uint32_t cloaked_count = _cloaked_size(count);
+					const uint32_t cloaked_count = _cloaked_size(count);
 
 					_decloak_chunk(to, from, end, cloaked_count);
 
@@ -242,10 +251,10 @@ _osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
 				{
 					union {
 						int32_t i;
-						uint8_t b [6];
+						uint8_t b [8];
 					} blobsize;
 					_decloak_chunk(blobsize.b, from, end, from[0] & 0x40 ? 7 : 5);
-					count = osc_bloblen(blobsize.b);
+					count = 4 + LV2_OSC_PADDED_SIZE(be32toh(blobsize.i));
 
 					uint32_t cloaked_count = _cloaked_size(count);
 
@@ -278,123 +287,6 @@ _osc_sysex2raw(uint8_t *dst, const uint8_t *src, uint32_t size)
 	return 0;
 }
 
-// rt
-static int
-_message(osc_time_t timestamp, const char *path, const char *fmt,
-	const osc_data_t *buf, size_t size, void *data)
-{
-	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
-	LV2_Atom_Forge_Frame frame [2];
-	LV2_Atom_Forge_Ref ref = handle->ref;
-
-	const osc_data_t *ptr = buf;
-
-	if(ref)
-		ref = osc_forge_message_push(&handle->oforge, forge, frame, path, fmt);
-
-	for(const char *type = fmt; *type; type++)
-		switch(*type)
-		{
-			case 'i':
-			{
-				int32_t i;
-				ptr = osc_get_int32(ptr, &i);
-				if(ref)
-					ref = osc_forge_int32(&handle->oforge, forge, i);
-				break;
-			}
-			case 'f':
-			{
-				float f;
-				ptr = osc_get_float(ptr, &f);
-				if(ref)
-					ref = osc_forge_float(&handle->oforge, forge, f);
-				break;
-			}
-			case 's':
-			case 'S':
-			{
-				const char *s;
-				ptr = osc_get_string(ptr, &s);
-				if(ref)
-					ref = osc_forge_string(&handle->oforge, forge, s);
-				break;
-			}
-			case 'b':
-			{
-				osc_blob_t b;
-				ptr = osc_get_blob(ptr, &b);
-				if(ref)
-					ref = osc_forge_blob(&handle->oforge, forge, b.size, b.payload);
-				break;
-			}
-
-			case 'h':
-			{
-				int64_t h;
-				ptr = osc_get_int64(ptr, &h);
-				if(ref)
-					ref = osc_forge_int64(&handle->oforge, forge, h);
-				break;
-			}
-			case 'd':
-			{
-				double d;
-				ptr = osc_get_double(ptr, &d);
-				if(ref)
-					ref = osc_forge_double(&handle->oforge, forge, d);
-				break;
-			}
-			case 't':
-			{
-				uint64_t t;
-				ptr = osc_get_timetag(ptr, &t);
-				if(ref)
-					ref = osc_forge_timestamp(&handle->oforge, forge, t);
-				break;
-			}
-
-			case 'T':
-			case 'F':
-			case 'N':
-			case 'I':
-			{
-				break;
-			}
-
-			case 'c':
-			{
-				char c;
-				ptr = osc_get_char(ptr, &c);
-				if(ref)
-					ref = osc_forge_char(&handle->oforge, forge, c);
-				break;
-			}
-			case 'm':
-			{
-				const uint8_t *m;
-				ptr = osc_get_midi(ptr, &m);
-				if(ref)
-					ref = osc_forge_midi(&handle->oforge, forge, 3, m + 1); // skip port byte
-				break;
-			}
-		}
-
-	if(ref)
-		osc_forge_message_pop(&handle->oforge, forge, frame);
-
-	handle->ref = ref;
-
-	return 1;
-}
-
-static const osc_method_t methods [] = {
-	{NULL, NULL, _message},
-
-	{NULL, NULL, NULL}
-};
-
 static void
 _decloak_event(plughandle_t *handle, int64_t frames, const uint8_t *arg, uint32_t size)
 {
@@ -405,12 +297,12 @@ _decloak_event(plughandle_t *handle, int64_t frames, const uint8_t *arg, uint32_
 		memcpy(handle->buf, arg, size);
 
 		size = _osc_sysex2raw(handle->buf, handle->buf, size);
-		if(size && osc_check_packet(handle->buf, size))
+		if(size)
 		{
 			if(handle->ref)
 				handle->ref = lv2_atom_forge_frame_time(forge, frames);
 			if(handle->ref)
-				osc_dispatch_method(handle->buf, size, methods, NULL, NULL, handle);
+				handle->ref = lv2_osc_forge_packet(forge, &handle->osc_urid, handle->map, handle->buf, size);
 		}
 	}
 }
@@ -428,13 +320,13 @@ _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 	
 	to += 2; // SYSEX_START + SYSEX_END
 
-	const uint32_t path_len = osc_strlen((const char *)from);
+	const uint32_t path_len = LV2_OSC_PADDED_SIZE(strlen((const char *)from) + 1);
 	count += path_len;
 	from += path_len;
 	to += path_len;
 
 	const uint8_t *fmt = (const uint8_t *)from;
-	const uint32_t fmt_len = osc_strlen((const char *)from);
+	const uint32_t fmt_len = LV2_OSC_PADDED_SIZE(strlen((const char *)from) + 1);
 	count += fmt_len;
 	from += fmt_len;
 	to += fmt_len;
@@ -446,25 +338,33 @@ _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 	count = 0;
 	for(const uint8_t *type=fmt+1; *type; type++)
 	{
-		switch(*type)
+		switch( (LV2_OSC_Type)*type)
 		{
-			case 'i':
-			case 'f':
-			case 'm':
+			case LV2_OSC_INT32:
+			case LV2_OSC_FLOAT:
+			case LV2_OSC_MIDI:
+			case LV2_OSC_CHAR:
+			case LV2_OSC_RGBA:
 				count += 4;
 				break;
 
-			case 'h':
-			case 'd':
-			case 't':
+			case LV2_OSC_TRUE:
+			case LV2_OSC_FALSE:
+			case LV2_OSC_NIL:
+			case LV2_OSC_IMPULSE:
+				break;
+
+			case LV2_OSC_INT64:
+			case LV2_OSC_DOUBLE:
+			case LV2_OSC_TIMETAG:
 				count += 8;
 				break;
 
-			case 's':
-			case 'S':
+			case LV2_OSC_STRING:
+			case LV2_OSC_SYMBOL:
 				if(count)
 				{
-					uint32_t cloaked_count = _cloaked_size(count);
+					const uint32_t cloaked_count = _cloaked_size(count);
 
 					from += count;
 					to += cloaked_count;
@@ -475,7 +375,7 @@ _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 				}
 
 				{
-					count = osc_strlen((const char *)from);
+					count = LV2_OSC_PADDED_SIZE(strlen((const char *)from) + 1);
 
 					from += count;
 					to += count;
@@ -488,10 +388,10 @@ _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 				}
 				break;
 
-			case 'b':
+			case LV2_OSC_BLOB:
 				if(count)
 				{
-					uint32_t cloaked_count = _cloaked_size(count);
+					const uint32_t cloaked_count = _cloaked_size(count);
 
 					from += count;
 					to += cloaked_count;
@@ -502,7 +402,7 @@ _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 				}
 
 				{
-					count = osc_bloblen((const uint8_t *)from);
+					count = 4 + LV2_OSC_PADDED_SIZE(be32toh(*(const int32_t *)from));
 					uint32_t cloaked_count = _cloaked_size(count);
 
 					from += count;
@@ -603,113 +503,6 @@ _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 }
 
 static void
-_cloak_message(const char *path, const char *fmt,
-	const LV2_Atom_Tuple *body, void *data)
-{
-	plughandle_t *handle = data;
-
-	osc_data_t *ptr = handle->buf;
-	const osc_data_t *end = handle->end;
-
-	ptr = osc_set_path(ptr, end, path);
-	ptr = osc_set_fmt(ptr, end, fmt);
-
-	const LV2_Atom *itr = lv2_atom_tuple_begin(body);
-	for(const char *type = fmt;
-		*type && !lv2_atom_tuple_is_end(LV2_ATOM_BODY(body), body->atom.size, itr);
-		type++, itr = lv2_atom_tuple_next(itr))
-	{
-		switch(*type)
-		{
-			case 'i':
-			{
-				ptr = osc_set_int32(ptr, end, ((const LV2_Atom_Int *)itr)->body);
-				break;
-			}
-			case 'f':
-			{
-				ptr = osc_set_float(ptr, end, ((const LV2_Atom_Float *)itr)->body);
-				break;
-			}
-			case 's':
-			case 'S':
-			{
-				ptr = osc_set_string(ptr, end, LV2_ATOM_BODY_CONST(itr));
-				break;
-			}
-			case 'b':
-			{
-				ptr = osc_set_blob(ptr, end, itr->size, LV2_ATOM_BODY_CONST(itr));
-				break;
-			}
-
-			case 'h':
-			{
-				ptr = osc_set_int64(ptr, end, ((const LV2_Atom_Long *)itr)->body);
-				break;
-			}
-			case 'd':
-			{
-				ptr = osc_set_double(ptr, end, ((const LV2_Atom_Double *)itr)->body);
-				break;
-			}
-			case 't':
-			{
-				ptr = osc_set_timetag(ptr, end, ((const LV2_Atom_Long *)itr)->body);
-				break;
-			}
-
-			case 'T':
-			case 'F':
-			case 'N':
-			case 'I':
-			{
-				break;
-			}
-
-			case 'c':
-			{
-				ptr = osc_set_char(ptr, end, ((const LV2_Atom_Int *)itr)->body);
-				break;
-			}
-			case 'm':
-			{
-				const uint8_t *src = LV2_ATOM_BODY_CONST(itr);
-				const uint8_t dst [4] = {
-					0x00, // port byte
-					itr->size >= 1 ? src[0] : 0x00,
-					itr->size >= 2 ? src[1] : 0x00,
-					itr->size >= 3 ? src[2] : 0x00
-				};
-				ptr = osc_set_midi(ptr, end, dst);
-				break;
-			}
-		}
-	}
-
-	uint32_t size = ptr - handle->buf;
-
-	if(size && osc_check_packet(handle->buf, size))
-	{
-		size = _osc_raw2sysex(handle->buf, handle->buf, size);
-
-		if(size)
-		{
-			LV2_Atom_Forge *forge = &handle->forge;
-
-			if(handle->ref)
-				handle->ref = lv2_atom_forge_frame_time(forge, handle->frames);
-			if(handle->ref)
-				handle->ref = lv2_atom_forge_atom(forge, size, handle->uris.midi_MidiEvent);
-			if(handle->ref)
-				handle->ref = lv2_atom_forge_raw(forge, handle->buf, size);
-			if(handle->ref)
-				lv2_atom_forge_pad(forge, size);
-		}
-	}
-}
-
-static void
 run(LV2_Handle instance, uint32_t nsamples)
 {
 	plughandle_t *handle = (plughandle_t *)instance;
@@ -738,7 +531,28 @@ run(LV2_Handle instance, uint32_t nsamples)
 		}
 		else
 		{
-			osc_atom_event_unroll(&handle->oforge, obj, NULL, NULL, _cloak_message, handle);
+			LV2_OSC_Writer writer;
+			lv2_osc_writer_initialize(&writer, handle->buf, BUF_SIZE);
+			lv2_osc_writer_packet(&writer, &handle->osc_urid, handle->unmap, obj->atom.size, &obj->body);
+			size_t size;
+			uint8_t *ptr = lv2_osc_writer_finalize(&writer, &size);
+
+			if(size)
+			{
+				size = _osc_raw2sysex(handle->buf, handle->buf, size);
+
+				if(size)
+				{
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, handle->frames);
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_atom(forge, size, handle->uris.midi_MidiEvent);
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_raw(forge, handle->buf, size);
+					if(handle->ref)
+						lv2_atom_forge_pad(forge, size);
+				}
+			}
 		}
 	}
 

@@ -20,7 +20,8 @@
 
 #include <eteroj.h>
 #include <varchunk.h>
-#include <lv2_osc.h>
+#include <osc.lv2/util.h>
+#include <osc.lv2/forge.h>
 #include <jsmn.h>
 
 #define MAX_TOKENS 256
@@ -56,7 +57,7 @@ struct _plughandle_t {
 		LV2_URID lv2_scale_point;
 	} urid;
 
-	osc_forge_t oforge;
+	LV2_OSC_URID osc_urid;
 	LV2_Atom_Forge forge;
 
 	LV2_Log_Log *log;
@@ -111,7 +112,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	if(handle->log)
 		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
-	osc_forge_init(&handle->oforge, handle->map);
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
 	handle->urid.subject = handle->map->map(handle->map->handle,
@@ -443,11 +444,10 @@ _set(plughandle_t *handle, int64_t frame_time, LV2_URID property, const LV2_Atom
 
 // rt
 static void
-_message_cb(const char *path, const char *fmt,
-	const LV2_Atom_Tuple *body, void *data)
+_message_cb(const char *path, const LV2_Atom_Tuple *body, void *data)
 {
 	plughandle_t *handle = data;
-	osc_forge_t *oforge = &handle->oforge;
+	LV2_OSC_URID *osc_urid = &handle->osc_urid;
 	LV2_Atom_Forge *forge = &handle->forge;
 	jsmntok_t *t = handle->tokens;
 
@@ -458,13 +458,14 @@ _message_cb(const char *path, const char *fmt,
 		int32_t id;
 		const char *destination;
 
-		atom = osc_deforge_message_vararg(oforge, forge, atom, "is", &id, &destination);
+		atom = lv2_osc_int32_get(osc_urid, atom, &id);
+		atom = lv2_osc_string_get(osc_urid, atom, &destination);
 		//fprintf(stderr, "success: %s\n", destination);
 
 		if(strrchr(destination, '!'))
 		{
 			const char *json;
-			atom = osc_deforge_string(oforge, forge, atom, &json);
+			atom = lv2_osc_string_get(osc_urid, atom, &json);
 			jsmn_init(&handle->parser);
 			int n_tokens = jsmn_parse(&handle->parser, json, strlen(json),
 				handle->tokens, MAX_TOKENS);
@@ -625,7 +626,9 @@ _message_cb(const char *path, const char *fmt,
 		const char *destination;
 		const char *msg;
 
-		atom = osc_deforge_message_vararg(oforge, forge, atom, "iss", &id, &destination, &msg);
+		atom = lv2_osc_int32_get(osc_urid, atom, &id);
+		atom = lv2_osc_string_get(osc_urid, atom, &destination);
+		atom = lv2_osc_string_get(osc_urid, atom, &msg);
 		if(handle->log)
 			lv2_log_trace(&handle->logger, "error: %s (%s)", destination, msg);
 	}
@@ -650,10 +653,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		if(  osc_atom_is_bundle(&handle->oforge, obj)
-			|| osc_atom_is_message(&handle->oforge, obj) )
+		if(lv2_osc_is_message_or_bundle_type(&handle->osc_urid, obj->body.otype))
 		{
-			osc_atom_event_unroll(&handle->oforge, obj, NULL, NULL, _message_cb, handle);
+			lv2_osc_unroll(&handle->osc_urid, obj, _message_cb, handle);
 			request_new = true;
 		}
 		else if(obj->atom.type == forge->Object)
@@ -680,30 +682,34 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 				const char *uri = handle->unmap->unmap(handle->unmap->handle, property->body);
 
-				lv2_atom_forge_frame_time(forge, 0);
 				if( (value->type == forge->Int) || (value->type == forge->Bool) )
 				{
-					osc_forge_message_vararg(&handle->oforge, forge, uri, "ii",
+					lv2_atom_forge_frame_time(forge, 0);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "ii",
 						handle->cnt++, ((const LV2_Atom_Int *)value)->body);
 				}
 				else if(value->type == forge->Long)
 				{
-					osc_forge_message_vararg(&handle->oforge, forge, uri, "ih",
+					lv2_atom_forge_frame_time(forge, 0);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "ih",
 						handle->cnt++, ((const LV2_Atom_Long *)value)->body);
 				}
 				else if(value->type == forge->Float)
 				{
-					osc_forge_message_vararg(&handle->oforge, forge, uri, "if",
+					lv2_atom_forge_frame_time(forge, 0);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "if",
 						handle->cnt++, ((const LV2_Atom_Float *)value)->body);
 				}
 				else if(value->type == forge->Double)
 				{
-					osc_forge_message_vararg(&handle->oforge, forge, uri, "id",
+					lv2_atom_forge_frame_time(forge, 0);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "id",
 						handle->cnt++, ((const LV2_Atom_Double *)value)->body);
 				}
 				else if(value->type == forge->String)
 				{
-					osc_forge_message_vararg(&handle->oforge, forge, uri, "is",
+					lv2_atom_forge_frame_time(forge, 0);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "is",
 						handle->cnt++, LV2_ATOM_BODY_CONST(value));
 				}
 			}
@@ -764,10 +770,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 		size_t len2;
 		const char *ptr;
 		int cnt = 0;
-		if( (ptr = varchunk_read_request(handle->rb, &len2)) && (cnt++ < 5) ) //TODO how many?
+		if( (ptr = varchunk_read_request(handle->rb, &len2)) && (cnt++ < 10) ) //TODO how many?
 		{
 			lv2_atom_forge_frame_time(forge, 0);
-			osc_forge_message_vararg(&handle->oforge, forge, ptr, "i", handle->cnt++);
+			lv2_osc_forge_message_vararg(forge, &handle->osc_urid, ptr, "i", handle->cnt++);
 
 			varchunk_read_advance(handle->rb);
 		}

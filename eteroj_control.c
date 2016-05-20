@@ -20,8 +20,7 @@
 #include <math.h>
 
 #include <eteroj.h>
-#include <osc.h>
-#include <lv2_osc.h>
+#include <osc.lv2/util.h>
 #include <props.h>
 
 #define MAX_STRLEN 512
@@ -47,7 +46,7 @@ struct _plughandle_t {
 	LV2_Atom_Forge_Ref ref;
 
 	int64_t frames;
-	osc_forge_t oforge;
+	LV2_OSC_URID osc_urid;
 
 	PROPS_T(props, MAX_NPROPS);
 
@@ -264,7 +263,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	osc_forge_init(&handle->oforge, handle->map);
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
@@ -323,28 +322,31 @@ activate(LV2_Handle instance)
 }
 
 static inline double
-_value(const char *fmt, const LV2_Atom_Tuple *body, LV2_Atom_Forge *forge)
+_value(LV2_OSC_URID *osc_urid, const LV2_Atom_Tuple *arguments, LV2_Atom_Forge *forge)
 {
-	const LV2_Atom *itr = lv2_atom_tuple_begin(body);
-	for(const char *type = fmt;
-		*type && !lv2_atom_tuple_is_end(LV2_ATOM_BODY(body), body->atom.size, itr);
-		type++, itr = lv2_atom_tuple_next(itr))
+	LV2_ATOM_TUPLE_FOREACH(arguments, itr)
 	{
-		if( (*type == OSC_INT32) && (itr->type == forge->Int) )
-			return ((const LV2_Atom_Int *)itr)->body;
-		else if( (*type == OSC_INT64) && (itr->type == forge->Long) )
-			return ((const LV2_Atom_Long *)itr)->body;
-		else if( (*type == OSC_FLOAT) && (itr->type == forge->Float) )
-			return ((const LV2_Atom_Float *)itr)->body;
-		else if( (*type == OSC_DOUBLE) && (itr->type == forge->Double) )
-			return ((const LV2_Atom_Double *)itr)->body;
+		const LV2_OSC_Type type = lv2_osc_argument_type(osc_urid, itr);
+		switch(type)
+		{
+			case LV2_OSC_INT32:
+				return ((const LV2_Atom_Int *)itr)->body;
+			case LV2_OSC_INT64:
+				return ((const LV2_Atom_Long *)itr)->body;
+			case LV2_OSC_FLOAT:
+				return ((const LV2_Atom_Float *)itr)->body;
+			case LV2_OSC_DOUBLE:
+				return ((const LV2_Atom_Double *)itr)->body;
+			default:
+				break;
+		}
 	}
 
 	return MIN_VAL;
 }
 
 static void
-_message(const char *path, const char *fmt, const LV2_Atom_Tuple *body, void *data)
+_unroll(const char *path, const LV2_Atom_Tuple *body, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
@@ -371,7 +373,7 @@ _message(const char *path, const char *fmt, const LV2_Atom_Tuple *body, void *da
 	{
 		if(!strncmp(path, handle->state.path[i], MAX_STRLEN))
 		{
-			const double value = _value(fmt, body, &handle->forge);
+			const double value = _value(&handle->osc_urid, body, &handle->forge);
 
 			if(value < handle->state.min[i])
 			{
@@ -413,7 +415,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 		if(!props_advance(&handle->props, forge, handle->frames, obj, &handle->ref))
 		{
-			osc_atom_event_unroll(&handle->oforge, obj, NULL, NULL, _message, handle);
+			lv2_osc_unroll(&handle->osc_urid, obj, _unroll, handle);
 		}
 	}
 

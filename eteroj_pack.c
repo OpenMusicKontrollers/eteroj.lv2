@@ -19,8 +19,8 @@
 #include <stdlib.h>
 
 #include <eteroj.h>
-#include <osc.h>
-#include <lv2_osc.h>
+#include <osc.lv2/util.h>
+#include <osc.lv2/forge.h>
 #include <props.h>
 
 #define MAX_NPROPS 1
@@ -44,7 +44,7 @@ struct _plughandle_t {
 
 	PROPS_T(props, MAX_NPROPS);
 	LV2_Atom_Forge forge;
-	osc_forge_t oforge;
+	LV2_OSC_URID osc_urid;
 
 	plugstate_t state;
 	plugstate_t stash;
@@ -84,7 +84,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 
 	handle->uris.midi_MidiEvent = handle->map->map(handle->map->handle, LV2_MIDI__MidiEvent);
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	osc_forge_init(&handle->oforge, handle->map);
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 	
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
@@ -120,20 +120,15 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 }
 
 static void
-_unpack_message(const char *path, const char *fmt,
-	const LV2_Atom_Tuple *body, void *data)
+_unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Ref ref = handle->ref;
 
-	const LV2_Atom *itr = lv2_atom_tuple_begin(body);
-	for(const char *type = fmt;
-		*type && !lv2_atom_tuple_is_end(LV2_ATOM_BODY(body), body->atom.size, itr);
-		type++, itr = lv2_atom_tuple_next(itr))
+	LV2_ATOM_TUPLE_FOREACH(arguments, itr)	
 	{
-		if(  (*type == OSC_MIDI)
-			&& (itr->type == handle->uris.midi_MidiEvent) )
+		if(lv2_osc_argument_type(&handle->osc_urid, itr) == LV2_OSC_MIDI)
 		{
 			if(ref)
 				ref = lv2_atom_forge_frame_time(forge, handle->frames);
@@ -175,17 +170,17 @@ run(LV2_Handle instance, uint32_t nsamples)
 				if(handle->ref)
 					handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
 				if(handle->ref)
-					handle->ref = osc_forge_message_push(&handle->oforge, forge, frames, handle->state.pack_path, "m");
+					handle->ref = lv2_osc_forge_message_head(forge, &handle->osc_urid, frames, handle->state.pack_path);
 				if(handle->ref)
-					handle->ref = osc_forge_midi(&handle->oforge, forge, obj->atom.size, LV2_ATOM_BODY_CONST(&obj->atom));
+					handle->ref = lv2_osc_forge_midi(forge, &handle->osc_urid, LV2_ATOM_BODY_CONST(&obj->atom), obj->atom.size);
 				if(handle->ref)
-					osc_forge_message_pop(&handle->oforge, forge, frames);
+					lv2_osc_forge_pop(forge, frames);
 			}
 		}
 		else if(!props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref))
 		{
 			// unpack MIDI from OSC
-			osc_atom_event_unroll(&handle->oforge, obj, NULL, NULL, _unpack_message, handle);
+			lv2_osc_unroll(&handle->osc_urid, obj, _unroll, handle);
 		}
 	}
 

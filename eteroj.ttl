@@ -85,7 +85,7 @@ eteroj:io
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
-	lv2:requiredFeature work:schedule, urid:map, state:loadDefaultState ;
+	lv2:requiredFeature work:schedule, urid:map, urid:unmap, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log, osc:schedule ;
 
 	lv2:port [
@@ -144,7 +144,7 @@ eteroj:disk
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:extensionData work:interface, state:interface ;
-	lv2:requiredFeature work:schedule, urid:map, state:makePath, state:loadDefaultState ;
+	lv2:requiredFeature work:schedule, urid:map, urid:unmap, state:makePath, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	lv2:port [
@@ -229,6 +229,7 @@ eteroj:cloak
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+	lv2:requiredFeature urid:map, urid:unmap ;
 
 	# input event port
 	lv2:port [

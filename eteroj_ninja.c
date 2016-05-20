@@ -19,9 +19,9 @@
 #include <stdlib.h>
 
 #include <eteroj.h>
-#include <osc.h>
 #include <varchunk.h>
-#include <lv2_osc.h>
+#include <osc.lv2/util.h>
+#include <osc.lv2/forge.h>
 
 #include <sratom/sratom.h>
 
@@ -47,7 +47,7 @@ struct _plughandle_t {
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
 	LV2_Atom_Forge forge;
-	osc_forge_t oforge;
+	LV2_OSC_URID osc_urid;
 	int64_t frames;
 
 	Sratom *sratom;
@@ -135,7 +135,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	osc_forge_init(&handle->oforge, handle->map);
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 
 	handle->sratom = sratom_new(handle->map);
 	if(!handle->sratom)
@@ -182,16 +182,15 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 }
 
 static void
-_message(const char *path, const char *fmt,
-	const LV2_Atom_Tuple *body, void *data)
+_unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 {
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	if(strcmp(path, "/ttl") || strcmp(fmt, "s"))
+	if(strcmp(path, "/ttl"))
 		return;
 
-	const LV2_Atom *itr = lv2_atom_tuple_begin(body);
+	const LV2_Atom *itr = lv2_atom_tuple_begin(arguments);
 	if(itr->type != forge->String)
 		return;
 
@@ -270,7 +269,7 @@ _work(LV2_Handle instance,
 {
 	plughandle_t *handle = instance;
 	LV2_Atom_Forge *forge = &handle->forge;
-	osc_forge_t *oforge = &handle->oforge;
+	LV2_OSC_URID *osc_urid = &handle->osc_urid;
 
 	(void)respond;
 	(void)target;
@@ -291,10 +290,10 @@ _work(LV2_Handle instance,
 			const LV2_Atom *atom = &ev->body;
 			const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-			if(osc_atom_is_bundle(oforge, obj) || osc_atom_is_message(oforge, obj))
+			if(lv2_osc_is_message_or_bundle_type(osc_urid, obj->body.otype))
 			{
 				handle->frames = ev->time.frames;
-				osc_atom_event_unroll(oforge, obj, NULL, NULL, _message, handle);
+				lv2_osc_unroll(osc_urid, obj, _unroll, handle);
 			}
 			else
 			{
@@ -305,7 +304,7 @@ _work(LV2_Handle instance,
 				if(ttl)
 				{
 					lv2_atom_forge_frame_time(forge, ev->time.frames);
-					osc_forge_message_vararg(&handle->oforge, forge, "/ttl", "s", ttl);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, "/ttl", "s", ttl);
 
 					free(ttl);
 				}
