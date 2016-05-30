@@ -96,9 +96,9 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 #define SYSEX_START 0xf0
 #define SYSEX_END 0xf7
 
-typedef struct _stack_t stack_t;
+typedef struct _cloak_stack_t cloak_stack_t;
 
-struct _stack_t {
+struct _cloak_stack_t {
 	uint32_t size;
 	uint32_t cloaked_size;
 };
@@ -311,8 +311,8 @@ _decloak_event(plughandle_t *handle, int64_t frames, const uint8_t *arg, uint32_
 static uint32_t
 _osc_raw2sysex(uint8_t *dst, const uint8_t *src, uint32_t size)
 {
-	stack_t stack [32]; //TODO check for overflow
-	stack_t *ptr = stack;	
+	cloak_stack_t stack [32]; //TODO check for overflow
+	cloak_stack_t *ptr = stack;
 	uint32_t count = 0;
 
 	volatile const uint8_t *from = src;
