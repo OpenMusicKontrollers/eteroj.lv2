@@ -30,8 +30,6 @@ set(DEST lib/lv2/eteroj.lv2)
 
 find_package(PkgConfig) # ${PKG_CONFIG_FOUND}
 
-set(LIBS "m ${LIBS}")
-
 pkg_search_module(UV REQUIRED libuv>=1.0)
 include_directories(${UV_INCLUDE_DIRS})
 if(DEFINED STATIC_UV)
@@ -61,7 +59,7 @@ add_library(eteroj MODULE
 	eteroj_control.c
 	tlsf-3.0/tlsf.c
 	jsmn/jsmn.c)
-target_link_libraries(eteroj ${LIBS})
+target_link_libraries(eteroj m ${LIBS})
 set_target_properties(eteroj PROPERTIES PREFIX "")
 install(TARGETS eteroj DESTINATION ${DEST})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/eteroj.ttl DESTINATION ${DEST})
