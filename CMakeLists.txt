@@ -30,7 +30,7 @@ set(DEST lib/lv2/eteroj.lv2)
 
 find_package(PkgConfig) # ${PKG_CONFIG_FOUND}
 
-set(LIBS m)
+set(LIBS "m ${LIBS}")
 
 pkg_search_module(UV REQUIRED libuv>=1.0)
 include_directories(${UV_INCLUDE_DIRS})
