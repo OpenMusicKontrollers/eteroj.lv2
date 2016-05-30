@@ -26,7 +26,9 @@ set(ETEROJ_MICRO_VERSION 0)
 set(ETEROJ_VERSION "${ETEROJ_MAJOR_VERSION}.${ETEROJ_MINOR_VERSION}.${ETEROJ_MICRO_VERSION}")
 add_definitions("-DETEROJ_VERSION=\"${ETEROJ_VERSION}\"")
 
-set(DEST lib/lv2/eteroj.lv2)
+if(NOT DEFINED PLUGIN_DEST)
+	set(PLUGIN_DEST lib/lv2/eteroj.lv2)
+endif()
 
 find_package(PkgConfig) # ${PKG_CONFIG_FOUND}
 
@@ -61,9 +63,9 @@ add_library(eteroj MODULE
 	jsmn/jsmn.c)
 target_link_libraries(eteroj m ${LIBS})
 set_target_properties(eteroj PROPERTIES PREFIX "")
-install(TARGETS eteroj DESTINATION ${DEST})
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/eteroj.ttl DESTINATION ${DEST})
+install(TARGETS eteroj DESTINATION ${PLUGIN_DEST})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/eteroj.ttl DESTINATION ${PLUGIN_DEST})
 
 # manifest
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/manifest.ttl.in ${PROJECT_BINARY_DIR}/manifest.ttl)
-install(FILES ${PROJECT_BINARY_DIR}/manifest.ttl DESTINATION ${DEST})
+install(FILES ${PROJECT_BINARY_DIR}/manifest.ttl DESTINATION ${PLUGIN_DEST})
