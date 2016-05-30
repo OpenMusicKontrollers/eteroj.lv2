@@ -302,6 +302,23 @@ typedef enum _osc_stream_message_t {
 	OSC_STREAM_MESSAGE_DISCONNECT
 } osc_stream_message_t;
 
+#ifdef __WINDOWS__
+static inline char *
+strndup(const char *s, size_t n)
+{
+	char *result;
+	size_t len = strlen (s);
+	if(n < len)
+		len = n;
+	result = (char *) malloc (len + 1);
+	if(!result)
+		return 0;
+	result[len] = '\0';
+
+	return (char *) strncpy (result, s, len);
+}
+#endif
+
 static inline void
 _instant_msg(osc_stream_t *stream, osc_stream_message_t type)
 {
