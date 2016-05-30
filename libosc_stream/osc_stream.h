@@ -1169,7 +1169,7 @@ _tcp_flush(osc_stream_t *stream)
 
 	if(msg[1].base && (msg[1].len > 0) )
 	{
-		tcp->duplex.prefix = htobe32(msg[1].len);
+		tcp->duplex.prefix = htonl(msg[1].len);
 		msg[0].base = (char *)&tcp->duplex.prefix;
 		msg[0].len = sizeof(int32_t);
 
@@ -1418,7 +1418,7 @@ _ser_flush(osc_stream_t *stream)
 
 	if(msg[1].base && (msg[1].len > 0) )
 	{
-		ser->duplex.prefix = htobe32(msg[1].len);
+		ser->duplex.prefix = htonl(msg[1].len);
 		msg[0].base = (char *)&ser->duplex.prefix;
 		msg[0].len = sizeof(int32_t);
 
