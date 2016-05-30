@@ -239,7 +239,7 @@ _play(plughandle_t *handle, int64_t to, uint32_t capacity)
 		if(handle->offset < 0)
 		{
 			if(handle->log)
-				lv2_log_trace(&handle->logger, "_play: event late %li", handle->offset);
+				lv2_log_trace(&handle->logger, "_play: event late %"PRIi64, handle->offset);
 
 			handle->offset = 0;
 		}

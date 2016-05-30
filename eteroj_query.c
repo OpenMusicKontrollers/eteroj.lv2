@@ -510,7 +510,7 @@ _message_cb(const char *path, const LV2_Atom_Tuple *body, void *data)
 					for(int j = 0; j < value->size; j++)
 					{
 						jsmntok_t *item = &t[i++];
-						size_t len;
+						size_t len = 0;
 						const char *s = json_string(json, item, &len);
 				
 						// add request to ring buffer
