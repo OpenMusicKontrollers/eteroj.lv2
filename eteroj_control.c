@@ -175,7 +175,7 @@ static const props_def_t stat_path [MAX_SLOTS] = {
 	[4] = STAT_PATH(5),
 	[5] = STAT_PATH(6),
 	[6] = STAT_PATH(7),
-	[7] = STAT_PATH(7)
+	[7] = STAT_PATH(8)
 };
 
 #define STAT_MIN(NUM) \
