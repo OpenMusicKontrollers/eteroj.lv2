@@ -34,6 +34,7 @@ target_link_libraries(props ${LIBS})
 set_target_properties(props PROPERTIES PREFIX "")
 install(TARGETS props DESTINATION ${DEST})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/test/props.ttl DESTINATION ${DEST})
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/test/chunk.bin DESTINATION ${DEST})
 
 # manifest
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test/manifest.ttl.in ${PROJECT_BINARY_DIR}/manifest.ttl)

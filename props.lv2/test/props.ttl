@@ -93,6 +93,12 @@ props:statPath
 	rdfs:label "statPath" ;
 	rdfs:comment "This is a path" .
 
+props:statChunk
+	a lv2:Parameter ;
+	rdfs:range atom:Chunk;
+	rdfs:label "statChunk" ;
+	rdfs:comment "This is a chunk" .
+
 # Looper Test
 props:test
 	a lv2:Plugin ,
@@ -126,17 +132,21 @@ props:test
 		lv2:designation lv2:control ;
 	] ;
 
-	patch:writable props:statInt ;
-	patch:writable props:statFloat ;
-	patch:writable props:statString ;
-	patch:writable props:statPath ;
+	patch:writable
+		props:statInt ,
+		props:statFloat ,
+		props:statString ,
+		props:statPath ,
+		props:statChunk ;
 
-	patch:readable props:statLong ;
-	patch:readable props:statDouble ;
+	patch:readable
+		props:statLong ,
+		props:statDouble ;
 
 	state:state [
 		props:statInt 4 ;
 		props:statFloat "0.4"^^xsd:float ;
 		props:statString "Hello world" ;
-		props:statPath <hello.world> ;
+		props:statPath <manifest.ttl> ;
+		props:statChunk "Q"^^xsd:base64Binary ;
 	] .

@@ -24,7 +24,7 @@
 #define PROPS_PREFIX		"http://open-music-kontrollers.ch/lv2/props#"
 #define PROPS_TEST_URI	PROPS_PREFIX"test"
 
-#define MAX_NPROPS 32
+#define MAX_NPROPS 33
 #define MAX_STRLEN 256
 
 typedef struct _plugstate0_t plugstate0_t;
@@ -48,6 +48,7 @@ struct _plugstate1_t {
 	double val4;
 	char val5 [MAX_STRLEN];
 	char val6 [MAX_STRLEN];
+	uint8_t val7 [MAX_STRLEN];
 };
 
 struct _plughandle_t {
@@ -382,6 +383,17 @@ static const props_def_t stat6 = {
 	.max_size = MAX_STRLEN // strlen
 };
 
+static const props_def_t stat7 = {
+	.label = "statChunk",
+	.property = PROPS_PREFIX"statChunk",
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Chunk,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_ALL,
+	.event_cb = _intercept,
+	.max_size = MAX_STRLEN // strlen
+};
+
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
 	const char *bundle_path, const LV2_Feature *const *features)
@@ -446,7 +458,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		|| !(handle->urid.stat4 =
 				props_register(&handle->props, &stat4, &stat->val4, &_stat->val4))
 		|| !props_register(&handle->props, &stat5, &stat->val5, &_stat->val5)
-		|| !props_register(&handle->props, &stat6, &stat->val6, &_stat->val6) )
+		|| !props_register(&handle->props, &stat6, &stat->val6, &_stat->val6)
+		|| !props_register(&handle->props, &stat7, &stat->val7, &_stat->val7) )
 	{
 		_log_printf(handle, handle->log_trace, "ERR     : registering");
 		free(handle);
