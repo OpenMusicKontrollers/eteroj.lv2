@@ -384,12 +384,15 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 
 			if(values_cnt && values)
 			{
+				LV2_Atom_Forge_Frame tuple_frame;
+				lv2_atom_forge_key(forge, handle->urid.lv2_scale_point);
+				lv2_atom_forge_tuple(forge, &tuple_frame);
+
 				//iterate over all scale_points
 				for(int i=0; i<values_cnt; i++)
 				{
 					jsmntok_t *tok = &values[i];
 
-					lv2_atom_forge_key(forge, handle->urid.lv2_scale_point);
 					LV2_Atom_Forge_Frame scale_point_frame;
 					lv2_atom_forge_object(forge, &scale_point_frame, 0, 0);
 					{
@@ -413,6 +416,7 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 					}
 					lv2_atom_forge_pop(forge, &scale_point_frame);
 				}
+				lv2_atom_forge_pop(forge, &tuple_frame);
 			}
 		}
 		lv2_atom_forge_pop(forge, &add_frame);
