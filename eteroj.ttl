@@ -60,17 +60,22 @@ proj:eteroj
 eteroj:url
 	a lv2:Parameter ;
 	rdfs:label "Url" ;
+	rdfs:comment "eg. osc.udp://localhost:3030, osc.slip.tcp6://:4040" ;
 	rdfs:range atom:String .
 
 eteroj:error
 	a lv2:Parameter ;
 	rdfs:label "Error" ;
+	rdfs:comment "will list connection errors" ;
 	rdfs:range atom:String .
 
 eteroj:status
 	a lv2:Parameter ;
 	rdfs:label "Status" ;
+	rdfs:comment "will list connection status" ;
 	rdfs:range atom:Int ;
+	lv2:minimum 0 ;
+	lv2:maximum 4 ;
 	lv2:scalePoint [ rdfs:label "Idle" ;			rdf:value 0 ] ;
 	lv2:scalePoint [ rdfs:label "Ready" ;			rdf:value 1 ] ;
 	lv2:scalePoint [ rdfs:label "Timedout" ;	rdf:value 2 ] ;
@@ -130,11 +135,13 @@ eteroj:io
 eteroj:disk_record
 	a lv2:Parameter ;
 	rdfs:label "Record" ;
+	rdfs:comment "toggle whether to record or not" ;
 	rdfs:range atom:Bool .
 
 eteroj:disk_path
 	a lv2:Parameter ;
 	rdfs:label "File path" ;
+	rdfs:comment "file path to store recordings to" ;
 	rdfs:range atom:Path .
 
 eteroj:disk
@@ -260,6 +267,7 @@ eteroj:cloak
 eteroj:pack_path
 	a lv2:Parameter ;
 	rdfs:label "Path" ;
+	rdfs:comment "OSC path to be used, e.g. /midi" ;
 	rdfs:range atom:String .
 
 # (Un)Pack Plugin
@@ -343,118 +351,143 @@ eteroj:ninja
 		lv2:designation lv2:control ;
 	] .
 
+
 eteroj:control_learn_1
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 1" .
 eteroj:control_learn_2
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 2" .
 eteroj:control_learn_3
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 3" .
 eteroj:control_learn_4
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 4" .
 eteroj:control_learn_5
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 5" .
 eteroj:control_learn_6
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 6" .
 eteroj:control_learn_7
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 7" .
 eteroj:control_learn_8
 	a lv2:Parameter ;
 	rdfs:range atom:Bool ;
+	rdfs:comment "toggle whether to learn or not" ;
 	rdfs:label "Learn 8" .
 
 eteroj:control_path_1
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 1" .
 eteroj:control_path_2
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 2" .
 eteroj:control_path_3
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 3" .
 eteroj:control_path_4
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 4" .
 eteroj:control_path_5
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 5" .
 eteroj:control_path_6
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 6" .
 eteroj:control_path_7
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 7" .
 eteroj:control_path_8
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
+	rdfs:comment "learnt or manually set OSC path" ;
 	rdfs:label "Path 8" .
 
 eteroj:control_min_1
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 1" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_2
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 2" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_3
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 3" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_4
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 4" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_5
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 5" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_6
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 6" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_7
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 7" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_min_8
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Minimum 8" ;
+	rdfs:comment "learnt or manually set minimum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 
@@ -462,48 +495,56 @@ eteroj:control_max_1
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 1" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_2
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 2" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_3
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 3" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_4
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 4" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_5
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 5" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_6
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 6" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_7
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 7" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 eteroj:control_max_8
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "Maximum 8" ;
+	rdfs:comment "learnt or manually set maximum value" ;
 	lv2:minimum 0.0 ;
 	lv2:maximum 127.0 .
 
