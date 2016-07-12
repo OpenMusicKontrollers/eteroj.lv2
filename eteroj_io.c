@@ -403,6 +403,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
+	uv_loop_init(&handle->loop);
+
 	return handle;
 }
 
@@ -427,9 +429,7 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 static void
 activate(LV2_Handle instance)
 {
-	plughandle_t *handle = instance;
-
-	uv_loop_init(&handle->loop);
+	// nothing
 }
 
 static const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
@@ -683,14 +683,14 @@ deactivate(LV2_Handle instance)
 		osc_stream_free(handle->data.stream);
 
 	uv_run(&handle->loop, UV_RUN_NOWAIT);
-
-	uv_loop_close(&handle->loop);
 }
 
 static void
 cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
+
+	uv_loop_close(&handle->loop);
 
 	tlsf_destroy(handle->tlsf);
 	varchunk_free(handle->data.from_worker);
