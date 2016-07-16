@@ -68,4 +68,13 @@ extern const LV2_Descriptor eteroj_pack;
 extern const LV2_Descriptor eteroj_ninja;
 extern const LV2_Descriptor eteroj_control;
 
+// there is a bug in LV2 <= 0.10
+#if defined(LV2_ATOM_TUPLE_FOREACH)
+#	undef LV2_ATOM_TUPLE_FOREACH
+#	define LV2_ATOM_TUPLE_FOREACH(tuple, iter) \
+	for (LV2_Atom* (iter) = lv2_atom_tuple_begin(tuple); \
+	     !lv2_atom_tuple_is_end(LV2_ATOM_BODY(tuple), (tuple)->atom.size, (iter)); \
+	     (iter) = lv2_atom_tuple_next(iter))
+#endif
+
 #endif // _ETEROJ_LV2_H
