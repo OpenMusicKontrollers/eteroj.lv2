@@ -795,9 +795,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 			handle->frames = frames;
 			lv2_osc_unroll(&handle->osc_urid, obj, _message_cb, handle);
 		}
-		else if( (obj->atom.type == forge->Object)
-			&& !props_advance(&handle->props, forge, frames, obj, &handle->ref) )
+		else if(obj->atom.type == forge->Object)
 		{
+			props_advance(&handle->props, forge, frames, obj, &handle->ref);
+
 			if(obj->body.otype == handle->urid.patch_set)
 			{
 				const LV2_Atom_URID *subject = NULL;
