@@ -269,6 +269,15 @@ eteroj:pack_path
 	rdfs:label "Path" ;
 	rdfs:comment "OSC path to be used, e.g. /midi" ;
 	rdfs:range atom:String .
+eteroj:pack_format
+	a lv2:Parameter ;
+	rdfs:label "Format" ;
+	rdfs:comment "OSC Argument format to be used for MIDI payload" ;
+	rdfs:range atom:Int ;
+	lv2:minimum 0 ;
+	lv2:maximum 2 ;
+	lv2:scalePoint [ rdfs:label "(m)idi" ; rdf:value 0 ] ;
+	lv2:scalePoint [ rdfs:label "(b)lob" ; rdf:value 1 ] .
 
 # (Un)Pack Plugin
 eteroj:pack
@@ -311,11 +320,13 @@ eteroj:pack
 
 	# parameters
 	patch:writable
-		eteroj:pack_path ;
+		eteroj:pack_path ,
+		eteroj:pack_format;
 
 	# default state
 	state:state [
 		eteroj:pack_path "/midi" ;
+		eteroj:pack_format 0 ;
 	] .
 	
 # Ninja Plugin

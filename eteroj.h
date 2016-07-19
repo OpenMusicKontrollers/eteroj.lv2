@@ -50,6 +50,7 @@
 #define ETEROJ_DISK_RECORD_URI				ETEROJ_URI"#disk_record"
 #define ETEROJ_DISK_PATH_URI					ETEROJ_URI"#disk_path"
 #define ETEROJ_PACK_PATH_URI					ETEROJ_URI"#pack_path"
+#define ETEROJ_PACK_FORMAT_URI				ETEROJ_URI"#pack_format"
 
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"

@@ -23,14 +23,21 @@
 #include <osc.lv2/forge.h>
 #include <props.h>
 
-#define MAX_NPROPS 1
+#define MAX_NPROPS 2
 #define MAX_STRLEN 512
 
+typedef enum _pack_format_t pack_format_t;
 typedef struct _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
 
+enum _pack_format_t {
+	PACK_FORMAT_MIDI = 0,
+	PACK_FORMAT_BLOB = 1
+};
+
 struct _plugstate_t {
 	char pack_path [MAX_STRLEN];
+	int32_t pack_format;
 };
 
 struct _plughandle_t {
@@ -59,6 +66,13 @@ static const props_def_t pack_path_def = {
 	.type = LV2_ATOM__String,
 	.mode = PROP_MODE_STATIC,
 	.max_size = MAX_STRLEN
+};
+
+static const props_def_t pack_format_def = {
+	.property = ETEROJ_PACK_FORMAT_URI,
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Int,
+	.mode = PROP_MODE_STATIC
 };
 
 static LV2_Handle
@@ -92,7 +106,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 		return NULL;
 	}
 
-	if(!props_register(&handle->props, &pack_path_def, handle->state.pack_path, handle->stash.pack_path))
+	if(  !props_register(&handle->props, &pack_path_def, handle->state.pack_path, handle->stash.pack_path)
+		|| !props_register(&handle->props, &pack_format_def, &handle->state.pack_format, &handle->stash.pack_format) )
 	{
 		free(handle);
 		return NULL;
@@ -128,7 +143,21 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 
 	LV2_ATOM_TUPLE_FOREACH(arguments, itr)	
 	{
-		if(lv2_osc_argument_type(&handle->osc_urid, itr) == LV2_OSC_MIDI)
+		bool is_midi = false;
+
+		switch((pack_format_t)handle->state.pack_format)
+		{
+			case PACK_FORMAT_MIDI:
+				if(lv2_osc_argument_type(&handle->osc_urid, itr) == LV2_OSC_MIDI)
+					is_midi = true;
+				break;
+			case PACK_FORMAT_BLOB:
+				if(lv2_osc_argument_type(&handle->osc_urid, itr) == LV2_OSC_BLOB)
+					is_midi = true;
+				break;
+		}
+
+		if(is_midi)
 		{
 			if(ref)
 				ref = lv2_atom_forge_frame_time(forge, handle->frames);
@@ -164,17 +193,39 @@ run(LV2_Handle instance, uint32_t nsamples)
 		if(obj->atom.type == handle->uris.midi_MidiEvent)
 		{
 			// pack MIDI into OSC
-			if(obj->atom.size <= 3) //TODO handle SysEx?
+			switch((pack_format_t)handle->state.pack_format)
 			{
-				LV2_Atom_Forge_Frame frames [2];
-				if(handle->ref)
-					handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
-				if(handle->ref)
-					handle->ref = lv2_osc_forge_message_head(forge, &handle->osc_urid, frames, handle->state.pack_path);
-				if(handle->ref)
-					handle->ref = lv2_osc_forge_midi(forge, &handle->osc_urid, LV2_ATOM_BODY_CONST(&obj->atom), obj->atom.size);
-				if(handle->ref)
-					lv2_osc_forge_pop(forge, frames);
+				case PACK_FORMAT_MIDI:
+				{
+					if(obj->atom.size <= 3) // OSC 'm' type does not support more :(
+					{
+						LV2_Atom_Forge_Frame frames [2];
+						if(handle->ref)
+							handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
+						if(handle->ref)
+							handle->ref = lv2_osc_forge_message_head(forge, &handle->osc_urid, frames, handle->state.pack_path);
+						if(handle->ref)
+							handle->ref = lv2_osc_forge_midi(forge, &handle->osc_urid, LV2_ATOM_BODY_CONST(&obj->atom), obj->atom.size);
+						if(handle->ref)
+							lv2_osc_forge_pop(forge, frames);
+					}
+
+					break;
+				}
+				case PACK_FORMAT_BLOB:
+				{
+					LV2_Atom_Forge_Frame frames [2];
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_message_head(forge, &handle->osc_urid, frames, handle->state.pack_path);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_blob(forge, &handle->osc_urid, LV2_ATOM_BODY_CONST(&obj->atom), obj->atom.size);
+					if(handle->ref)
+						lv2_osc_forge_pop(forge, frames);
+
+					break;
+				}
 			}
 		}
 		else if(!props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref))
