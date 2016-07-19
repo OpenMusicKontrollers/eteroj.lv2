@@ -55,6 +55,7 @@ struct _plughandle_t {
 		LV2_URID patch_readable;
 
 		LV2_URID rdfs_label;
+		LV2_URID rdfs_comment;
 		LV2_URID rdfs_range;
 
 		LV2_URID rdf_value;
@@ -93,7 +94,7 @@ struct _plughandle_t {
 static void
 _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 	const char *json, int range_cnt, jsmntok_t *range, int values_cnt, jsmntok_t *values,
-	LV2_URID property, const char *label, uint32_t label_len)
+	LV2_URID property, const char *label, uint32_t label_len, const char *comment, uint32_t comment_len)
 {
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame obj_frame;
@@ -110,22 +111,32 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 		: handle->urid.patch_readable;
 
 	LV2_URID _type = forge->Int;
-	if(type == 'i')
-		_type = forge->Int;
-	if(type == 'h')
-		_type = forge->Long;
-	else if(type == 'f')
-		_type = forge->Float;
-	else if(type == 'd')
-		_type = forge->Double;
-	else if(type == 's')
-		_type = forge->String;
-	//TODO do other types
+	switch((LV2_OSC_Type)type)
+	{
+		case LV2_OSC_INT32:
+			_type = forge->Int;
+			break;
+		case LV2_OSC_INT64:
+			_type = forge->Long;
+			break;
+		case LV2_OSC_FLOAT:
+			_type = forge->Float;
+			break;
+		case LV2_OSC_DOUBLE:
+			_type = forge->Double;
+			break;
+		case LV2_OSC_STRING:
+			_type = forge->String;
+			break;
+		default:
+			//TODO do other types
+			break;
+	}
 
 	jsmntok_t *mintok = NULL;
 	jsmntok_t *maxtok = NULL;
-	float min = 0.f;
-	float max = 1.f;
+	double min = 0.f;
+	double max = 1.f;
 
 	if(range_cnt && range)
 	{
@@ -133,7 +144,7 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 		maxtok = &range[1];
 		min = strtod(&json[mintok->start], NULL);
 		max = strtod(&json[maxtok->start], NULL);
-		if( (_type == forge->Int) && (min == 0.f) && (max == 1.f) )
+		if( (_type == forge->Int) && (min == 0.0) && (max == 1.0) )
 			_type = forge->Bool;
 	}
 
@@ -179,6 +190,9 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 			lv2_atom_forge_key(forge, handle->urid.rdfs_range);
 			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
 
+			lv2_atom_forge_key(forge, handle->urid.rdfs_comment);
+			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
+
 			lv2_atom_forge_key(forge, handle->urid.lv2_minimum);
 			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
 
@@ -198,6 +212,12 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 			{
 				lv2_atom_forge_key(forge, handle->urid.rdfs_label);
 				lv2_atom_forge_string(forge, label, label_len);
+			}
+
+			if(comment)
+			{
+				lv2_atom_forge_key(forge, handle->urid.rdfs_comment);
+				lv2_atom_forge_string(forge, comment, comment_len);
 			}
 
 			lv2_atom_forge_key(forge, handle->urid.rdfs_range);
@@ -452,6 +472,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	handle->urid.rdfs_label = handle->map->map(handle->map->handle,
 		"http://www.w3.org/2000/01/rdf-schema#label");
+	handle->urid.rdfs_comment = handle->map->map(handle->map->handle,
+		"http://www.w3.org/2000/01/rdf-schema#comment");
 	handle->urid.rdfs_range = handle->map->map(handle->map->handle,
 		"http://www.w3.org/2000/01/rdf-schema#range");
 
@@ -723,7 +745,7 @@ _message_cb(const char *path, const LV2_Atom_Tuple *body, void *data)
 				LV2_URID property = handle->map->map(handle->map->handle, dest);
 
 				_add(handle, 0, arg_type, arg_read, arg_write, json, arg_range_cnt, arg_range,
-					arg_values_cnt, arg_values, property, target, target_len);
+					arg_values_cnt, arg_values, property, target, target_len, desc, desc_len);
 			}
 		}
 		else
