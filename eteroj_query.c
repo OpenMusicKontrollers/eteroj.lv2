@@ -69,6 +69,7 @@ struct _plughandle_t {
 	LV2_OSC_URID osc_urid;
 	LV2_Atom_Forge forge;
 	LV2_Atom_Forge_Ref ref;
+	int64_t frames;
 
 	PROPS_T(props, MAX_NPROPS);
 
@@ -130,8 +131,8 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 	{
 		mintok = &range[0];
 		maxtok = &range[1];
-		min = atof(&json[mintok->start]);
-		max = atof(&json[maxtok->start]);
+		min = strtod(&json[mintok->start], NULL);
+		max = strtod(&json[maxtok->start], NULL);
 		if( (_type == forge->Int) && (min == 0.f) && (max == 1.f) )
 			_type = forge->Bool;
 	}
@@ -253,13 +254,13 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 
 						lv2_atom_forge_key(forge, handle->urid.rdf_value);
 						if(_type == forge->Int)
-							lv2_atom_forge_int(forge, atoi(&json[tok->start]));
+							lv2_atom_forge_int(forge, strtol(&json[tok->start], NULL, 0));
 						else if(_type == forge->Long)
-							lv2_atom_forge_long(forge, atoi(&json[tok->start]));
+							lv2_atom_forge_long(forge, strtol(&json[tok->start], NULL, 0));
 						else if(_type == forge->Float)
-							lv2_atom_forge_float(forge, atof(&json[tok->start]));
+							lv2_atom_forge_float(forge, strtod(&json[tok->start], NULL));
 						else if(_type == forge->Double)
-							lv2_atom_forge_double(forge, atof(&json[tok->start]));
+							lv2_atom_forge_double(forge, strtod(&json[tok->start], NULL));
 						else if(_type == forge->String)
 							lv2_atom_forge_string(forge, &json[tok->start], tok->end - tok->start);
 						else
@@ -295,8 +296,7 @@ _set(plughandle_t *handle, int64_t frame_time, LV2_URID property, const LV2_Atom
 		lv2_atom_forge_urid(forge, property);
 
 		lv2_atom_forge_key(forge, handle->urid.patch_value);
-		lv2_atom_forge_raw(forge, atom, lv2_atom_total_size(atom));
-		lv2_atom_forge_pad(forge, atom->size);
+		lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
 	}
 	lv2_atom_forge_pop(forge, &obj_frame);
 
@@ -532,7 +532,7 @@ json_int(const char *json, jsmntok_t *tok)
 	if(tok->type != JSMN_PRIMITIVE)
 		return -1;
 
-	return atoi(json + tok->start);
+	return strtol(json + tok->start, NULL, 10);
 }
 
 static inline float 
@@ -541,7 +541,7 @@ json_float(const char *json, jsmntok_t *tok)
 	if(tok->type != JSMN_PRIMITIVE)
 		return -1;
 
-	return atof(json + tok->start);
+	return strtod(json + tok->start, NULL);
 }
 
 static inline bool 
@@ -732,7 +732,7 @@ _message_cb(const char *path, const LV2_Atom_Tuple *body, void *data)
 			if(!lv2_atom_tuple_is_end(LV2_ATOM_BODY_CONST(body), body->atom.size, atom))
 			{
 				LV2_URID property = handle->map->map(handle->map->handle, destination);
-				_set(handle, 0, property, atom);
+				_set(handle, handle->frames, property, atom);
 			}
 		}
 	}
@@ -770,6 +770,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 		if(lv2_osc_is_message_or_bundle_type(&handle->osc_urid, obj->body.otype))
 		{
+			handle->frames = frames;
 			lv2_osc_unroll(&handle->osc_urid, obj, _message_cb, handle);
 		}
 		else if( (obj->atom.type == forge->Object)
