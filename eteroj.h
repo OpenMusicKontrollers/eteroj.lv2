@@ -51,6 +51,7 @@
 #define ETEROJ_DISK_PATH_URI					ETEROJ_URI"#disk_path"
 #define ETEROJ_PACK_PATH_URI					ETEROJ_URI"#pack_path"
 #define ETEROJ_PACK_FORMAT_URI				ETEROJ_URI"#pack_format"
+#define ETEROJ_QUERY_REFRESH_URI			ETEROJ_URI"#query_refresh"
 
 // plugin uris
 #define ETEROJ_IO_URI									ETEROJ_URI"#io"

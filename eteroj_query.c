@@ -22,11 +22,18 @@
 #include <varchunk.h>
 #include <osc.lv2/util.h>
 #include <osc.lv2/forge.h>
+#include <props.h>
 #include <jsmn.h>
 
+#define MAX_NPROPS 2
 #define MAX_TOKENS 256
 
+typedef struct _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
+
+struct _plugstate_t {
+	int32_t query_refresh;
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
@@ -55,10 +62,18 @@ struct _plughandle_t {
 		LV2_URID lv2_minimum;
 		LV2_URID lv2_maximum;
 		LV2_URID lv2_scale_point;
+
+		LV2_URID query_refresh;
 	} urid;
 
 	LV2_OSC_URID osc_urid;
 	LV2_Atom_Forge forge;
+	LV2_Atom_Forge_Ref ref;
+
+	PROPS_T(props, MAX_NPROPS);
+
+	plugstate_t state;
+	plugstate_t stash;
 
 	LV2_Log_Log *log;
 	LV2_Log_Logger logger;
@@ -74,170 +89,6 @@ struct _plughandle_t {
 	varchunk_t *rb;
 };
 
-static LV2_Handle
-instantiate(const LV2_Descriptor* descriptor, double rate,
-	const char *bundle_path, const LV2_Feature *const *features)
-{
-	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
-	if(!handle)
-		return NULL;
-	mlock(handle, sizeof(plughandle_t));
-
-	const LV2_State_Make_Path *make_path = NULL;
-
-	for(int i=0; features[i]; i++)
-	{
-		if(!strcmp(features[i]->URI, LV2_URID__map))
-			handle->map = features[i]->data;
-		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
-			handle->unmap = features[i]->data;
-		else if(!strcmp(features[i]->URI, LV2_LOG__log))
-			handle->log = features[i]->data;
-	}
-
-	if(!handle->map)
-	{
-		fprintf(stderr,
-			"%s: Host does not support urid:map\n", descriptor->URI);
-		free(handle);
-		return NULL;
-	}
-	if(!handle->unmap)
-	{
-		fprintf(stderr,
-			"%s: Host does not support urid:unmap\n", descriptor->URI);
-		free(handle);
-		return NULL;
-	}
-
-	if(handle->log)
-		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
-	lv2_osc_urid_init(&handle->osc_urid, handle->map);
-	lv2_atom_forge_init(&handle->forge, handle->map);
-
-	handle->urid.subject = handle->map->map(handle->map->handle,
-		descriptor->URI);
-
-	handle->urid.patch_message = handle->map->map(handle->map->handle,
-		LV2_PATCH__Message);
-	handle->urid.patch_set = handle->map->map(handle->map->handle,
-		LV2_PATCH__Set);
-	handle->urid.patch_get = handle->map->map(handle->map->handle,
-		LV2_PATCH__Get);
-	handle->urid.patch_subject = handle->map->map(handle->map->handle,
-		LV2_PATCH__subject);
-	handle->urid.patch_property = handle->map->map(handle->map->handle,
-		LV2_PATCH__property);
-	handle->urid.patch_value = handle->map->map(handle->map->handle,
-		LV2_PATCH__value);
-	handle->urid.patch_wildcard = handle->map->map(handle->map->handle,
-		LV2_PATCH__wildcard);
-	handle->urid.patch_patch = handle->map->map(handle->map->handle,
-		LV2_PATCH__Patch);
-	handle->urid.patch_add = handle->map->map(handle->map->handle,
-		LV2_PATCH__add);
-	handle->urid.patch_remove = handle->map->map(handle->map->handle,
-		LV2_PATCH__remove);
-	handle->urid.patch_writable = handle->map->map(handle->map->handle,
-		LV2_PATCH__writable);
-	handle->urid.patch_readable = handle->map->map(handle->map->handle,
-		LV2_PATCH__readable);
-
-	handle->urid.rdfs_label = handle->map->map(handle->map->handle,
-		"http://www.w3.org/2000/01/rdf-schema#label");
-	handle->urid.rdfs_range = handle->map->map(handle->map->handle,
-		"http://www.w3.org/2000/01/rdf-schema#range");
-
-	handle->urid.rdf_value = handle->map->map(handle->map->handle,
-		"http://www.w3.org/1999/02/22-rdf-syntax-ns#value");
-
-	handle->urid.lv2_minimum = handle->map->map(handle->map->handle,
-		LV2_CORE__minimum);
-	handle->urid.lv2_maximum = handle->map->map(handle->map->handle,
-		LV2_CORE__maximum);
-	handle->urid.lv2_scale_point = handle->map->map(handle->map->handle,
-		LV2_CORE__scalePoint);
-
-	handle->cnt = 0;
-
-	handle->rb = varchunk_new(65536, false);
-
-	return handle;
-}
-
-static void
-connect_port(LV2_Handle instance, uint32_t port, void *data)
-{
-	plughandle_t *handle = (plughandle_t *)instance;
-
-	switch(port)
-	{
-		case 0:
-			handle->osc_in = (const LV2_Atom_Sequence *)data;
-			break;
-		case 1:
-			handle->osc_out = (LV2_Atom_Sequence *)data;
-			break;
-		default:
-			break;
-	}
-}
-
-static inline int
-json_eq(const char *json, jsmntok_t *tok, const char *s)
-{
-	if(  (tok->type == JSMN_STRING)
-		&& ((int)strlen(s) == tok->end - tok->start)
-		&& !strncmp(json + tok->start, s, tok->end - tok->start) )
-	{
-		return 0;
-	}
-	
-	return -1;
-}
-
-static inline const char *
-json_string(const char *json, jsmntok_t *tok, size_t *len)
-{
-	if(tok->type != JSMN_STRING)
-		return NULL;
-
-	*len = tok->end - tok->start;
-	return json + tok->start;
-}
-
-static inline int32_t 
-json_int(const char *json, jsmntok_t *tok)
-{
-	if(tok->type != JSMN_PRIMITIVE)
-		return -1;
-
-	return atoi(json + tok->start);
-}
-
-static inline float 
-json_float(const char *json, jsmntok_t *tok)
-{
-	if(tok->type != JSMN_PRIMITIVE)
-		return -1;
-
-	return atof(json + tok->start);
-}
-
-static inline bool 
-json_bool(const char *json, jsmntok_t *tok)
-{
-	if(tok->type != JSMN_PRIMITIVE)
-		return false;
-
-	if(json[tok->start] == 't')
-		return true;
-	else if(json[tok->start] == 'f')
-		return false;
-
-	return false;
-}
-
 static void
 _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 	const char *json, int range_cnt, jsmntok_t *range, int values_cnt, jsmntok_t *values,
@@ -245,6 +96,7 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 {
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame obj_frame;
+	LV2_Atom_Forge_Ref ref = handle->ref;
 
 	if(write && !read) //TODO handle this
 		return;
@@ -422,6 +274,8 @@ _add(plughandle_t *handle, int64_t frame_time, char type, bool read, bool write,
 		lv2_atom_forge_pop(forge, &add_frame);
 	}
 	lv2_atom_forge_pop(forge, &obj_frame);
+
+	handle->ref = ref;
 }
 			
 static void
@@ -429,6 +283,7 @@ _set(plughandle_t *handle, int64_t frame_time, LV2_URID property, const LV2_Atom
 {
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame obj_frame;
+	LV2_Atom_Forge_Ref ref = handle->ref;
 
 	lv2_atom_forge_frame_time(forge, frame_time);
 	lv2_atom_forge_object(forge, &obj_frame, 0, handle->urid.patch_set);
@@ -444,6 +299,263 @@ _set(plughandle_t *handle, int64_t frame_time, LV2_URID property, const LV2_Atom
 		lv2_atom_forge_pad(forge, atom->size);
 	}
 	lv2_atom_forge_pop(forge, &obj_frame);
+
+	handle->ref = ref;
+}
+
+static void
+_clear(plughandle_t *handle, int64_t frame_time)
+{
+	LV2_Atom_Forge *forge = &handle->forge;
+	LV2_Atom_Forge_Frame obj_frame;
+	LV2_Atom_Forge_Ref ref = handle->ref;
+
+	lv2_atom_forge_frame_time(forge, frame_time);
+	lv2_atom_forge_object(forge, &obj_frame, 0, handle->urid.patch_patch);
+	{
+		lv2_atom_forge_key(forge, handle->urid.patch_subject);
+		lv2_atom_forge_urid(forge, handle->urid.subject);
+
+		lv2_atom_forge_key(forge, handle->urid.patch_remove);
+		LV2_Atom_Forge_Frame remove_frame;
+		lv2_atom_forge_object(forge, &remove_frame, 0, 0);
+		{
+			lv2_atom_forge_key(forge, handle->urid.patch_writable);
+			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
+
+			lv2_atom_forge_key(forge, handle->urid.patch_readable);
+			lv2_atom_forge_urid(forge, handle->urid.patch_wildcard);
+		}
+		lv2_atom_forge_pop(forge, &remove_frame);
+		
+		lv2_atom_forge_key(forge, handle->urid.patch_add);
+		LV2_Atom_Forge_Frame add_frame;
+		lv2_atom_forge_object(forge, &add_frame, 0, 0);
+		{
+			// empty
+		}
+		lv2_atom_forge_pop(forge, &add_frame);
+	}
+	lv2_atom_forge_pop(forge, &obj_frame);
+
+	handle->ref = ref;
+}
+
+static void
+_refresh(plughandle_t *handle, int64_t frame_time)
+{
+	_clear(handle, frame_time);
+
+	const char *destination = "/!";
+
+	// schedule on ring buffer
+	size_t len2 = strlen(destination) + 1;
+	char *ptr;
+	if((ptr = varchunk_write_request(handle->rb, len2)))
+	{
+		strncpy(ptr, destination, len2);
+		varchunk_write_advance(handle->rb, len2);
+	}
+	else if(handle->log)
+		lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
+}
+
+static void
+_intercept_refresh(void *data, LV2_Atom_Forge *forge, int64_t frames,
+	props_event_t event, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_refresh(handle, frames);
+
+	handle->state.query_refresh = false;
+	props_set(&handle->props, forge, frames, handle->urid.query_refresh, &handle->ref);
+}
+
+static const props_def_t query_refresh_def = {
+	.property = ETEROJ_QUERY_REFRESH_URI,
+	.access = LV2_PATCH__writable,
+	.type = LV2_ATOM__Bool,
+	.mode = PROP_MODE_STATIC,
+	.event_mask = PROP_EVENT_WRITE,
+	.event_cb = _intercept_refresh
+};
+
+static LV2_Handle
+instantiate(const LV2_Descriptor* descriptor, double rate,
+	const char *bundle_path, const LV2_Feature *const *features)
+{
+	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
+	if(!handle)
+		return NULL;
+	mlock(handle, sizeof(plughandle_t));
+
+	const LV2_State_Make_Path *make_path = NULL;
+
+	for(int i=0; features[i]; i++)
+	{
+		if(!strcmp(features[i]->URI, LV2_URID__map))
+			handle->map = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
+			handle->unmap = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_LOG__log))
+			handle->log = features[i]->data;
+	}
+
+	if(!handle->map)
+	{
+		fprintf(stderr,
+			"%s: Host does not support urid:map\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+	if(!handle->unmap)
+	{
+		fprintf(stderr,
+			"%s: Host does not support urid:unmap\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+
+	if(handle->log)
+		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
+	lv2_osc_urid_init(&handle->osc_urid, handle->map);
+	lv2_atom_forge_init(&handle->forge, handle->map);
+
+	handle->urid.subject = handle->map->map(handle->map->handle,
+		descriptor->URI);
+
+	handle->urid.patch_message = handle->map->map(handle->map->handle,
+		LV2_PATCH__Message);
+	handle->urid.patch_set = handle->map->map(handle->map->handle,
+		LV2_PATCH__Set);
+	handle->urid.patch_get = handle->map->map(handle->map->handle,
+		LV2_PATCH__Get);
+	handle->urid.patch_subject = handle->map->map(handle->map->handle,
+		LV2_PATCH__subject);
+	handle->urid.patch_property = handle->map->map(handle->map->handle,
+		LV2_PATCH__property);
+	handle->urid.patch_value = handle->map->map(handle->map->handle,
+		LV2_PATCH__value);
+	handle->urid.patch_wildcard = handle->map->map(handle->map->handle,
+		LV2_PATCH__wildcard);
+	handle->urid.patch_patch = handle->map->map(handle->map->handle,
+		LV2_PATCH__Patch);
+	handle->urid.patch_add = handle->map->map(handle->map->handle,
+		LV2_PATCH__add);
+	handle->urid.patch_remove = handle->map->map(handle->map->handle,
+		LV2_PATCH__remove);
+	handle->urid.patch_writable = handle->map->map(handle->map->handle,
+		LV2_PATCH__writable);
+	handle->urid.patch_readable = handle->map->map(handle->map->handle,
+		LV2_PATCH__readable);
+
+	handle->urid.rdfs_label = handle->map->map(handle->map->handle,
+		"http://www.w3.org/2000/01/rdf-schema#label");
+	handle->urid.rdfs_range = handle->map->map(handle->map->handle,
+		"http://www.w3.org/2000/01/rdf-schema#range");
+
+	handle->urid.rdf_value = handle->map->map(handle->map->handle,
+		"http://www.w3.org/1999/02/22-rdf-syntax-ns#value");
+
+	handle->urid.lv2_minimum = handle->map->map(handle->map->handle,
+		LV2_CORE__minimum);
+	handle->urid.lv2_maximum = handle->map->map(handle->map->handle,
+		LV2_CORE__maximum);
+	handle->urid.lv2_scale_point = handle->map->map(handle->map->handle,
+		LV2_CORE__scalePoint);
+
+	handle->cnt = 0;
+
+	handle->rb = varchunk_new(65536, false);
+
+	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
+	{
+		free(handle);
+		return NULL;
+	}
+
+	if( !(handle->urid.query_refresh =
+			props_register(&handle->props, &query_refresh_def, &handle->state.query_refresh, &handle->stash.query_refresh)))
+	{
+		free(handle);
+		return NULL;
+	}
+
+	return handle;
+}
+
+static void
+connect_port(LV2_Handle instance, uint32_t port, void *data)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	switch(port)
+	{
+		case 0:
+			handle->osc_in = (const LV2_Atom_Sequence *)data;
+			break;
+		case 1:
+			handle->osc_out = (LV2_Atom_Sequence *)data;
+			break;
+		default:
+			break;
+	}
+}
+
+static inline int
+json_eq(const char *json, jsmntok_t *tok, const char *s)
+{
+	if(  (tok->type == JSMN_STRING)
+		&& ((int)strlen(s) == tok->end - tok->start)
+		&& !strncmp(json + tok->start, s, tok->end - tok->start) )
+	{
+		return 0;
+	}
+	
+	return -1;
+}
+
+static inline const char *
+json_string(const char *json, jsmntok_t *tok, size_t *len)
+{
+	if(tok->type != JSMN_STRING)
+		return NULL;
+
+	*len = tok->end - tok->start;
+	return json + tok->start;
+}
+
+static inline int32_t 
+json_int(const char *json, jsmntok_t *tok)
+{
+	if(tok->type != JSMN_PRIMITIVE)
+		return -1;
+
+	return atoi(json + tok->start);
+}
+
+static inline float 
+json_float(const char *json, jsmntok_t *tok)
+{
+	if(tok->type != JSMN_PRIMITIVE)
+		return -1;
+
+	return atof(json + tok->start);
+}
+
+static inline bool 
+json_bool(const char *json, jsmntok_t *tok)
+{
+	if(tok->type != JSMN_PRIMITIVE)
+		return false;
+
+	if(json[tok->start] == 't')
+		return true;
+	else if(json[tok->start] == 'f')
+		return false;
+
+	return false;
 }
 
 // rt
@@ -649,20 +761,19 @@ run(LV2_Handle instance, uint32_t nsamples)
 	// prepare sequence forges
 	const uint32_t capacity = handle->osc_out->atom.size;
 	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->osc_out, capacity);
-	lv2_atom_forge_sequence_head(forge, &frame, 0);
-
-	bool request_new = false;
+	handle->ref = lv2_atom_forge_sequence_head(forge, &frame, 0);
 
 	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+		const int64_t frames = ev->time.frames;
 
 		if(lv2_osc_is_message_or_bundle_type(&handle->osc_urid, obj->body.otype))
 		{
 			lv2_osc_unroll(&handle->osc_urid, obj, _message_cb, handle);
-			request_new = true;
 		}
-		else if(obj->atom.type == forge->Object)
+		else if( (obj->atom.type == forge->Object)
+			&& !props_advance(&handle->props, forge, frames, obj, &handle->ref) )
 		{
 			if(obj->body.otype == handle->urid.patch_set)
 			{
@@ -688,33 +799,43 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 				if( (value->type == forge->Int) || (value->type == forge->Bool) )
 				{
-					lv2_atom_forge_frame_time(forge, 0);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "ii",
-						handle->cnt++, ((const LV2_Atom_Int *)value)->body);
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, frames);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "ii",
+							handle->cnt++, ((const LV2_Atom_Int *)value)->body);
 				}
 				else if(value->type == forge->Long)
 				{
-					lv2_atom_forge_frame_time(forge, 0);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "ih",
-						handle->cnt++, ((const LV2_Atom_Long *)value)->body);
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, frames);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "ih",
+							handle->cnt++, ((const LV2_Atom_Long *)value)->body);
 				}
 				else if(value->type == forge->Float)
 				{
-					lv2_atom_forge_frame_time(forge, 0);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "if",
-						handle->cnt++, ((const LV2_Atom_Float *)value)->body);
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, frames);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "if",
+							handle->cnt++, ((const LV2_Atom_Float *)value)->body);
 				}
 				else if(value->type == forge->Double)
 				{
-					lv2_atom_forge_frame_time(forge, 0);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "id",
-						handle->cnt++, ((const LV2_Atom_Double *)value)->body);
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, frames);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "id",
+							handle->cnt++, ((const LV2_Atom_Double *)value)->body);
 				}
 				else if(value->type == forge->String)
 				{
-					lv2_atom_forge_frame_time(forge, 0);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "is",
-						handle->cnt++, LV2_ATOM_BODY_CONST(value));
+					if(handle->ref)
+						handle->ref = lv2_atom_forge_frame_time(forge, frames);
+					if(handle->ref)
+						handle->ref = lv2_osc_forge_message_vararg(forge, &handle->osc_urid, uri, "is",
+							handle->cnt++, LV2_ATOM_BODY_CONST(value));
 				}
 			}
 			else if(obj->body.otype == handle->urid.patch_get)
@@ -734,19 +855,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 				if(!property)
 				{
-					const char *destination = "/!";
-
-					// schedule on ring buffer
-					size_t len2 = strlen(destination) + 1;
-					char *ptr;
-					if((ptr = varchunk_write_request(handle->rb, len2)))
-					{
-						strncpy(ptr, destination, len2);
-						varchunk_write_advance(handle->rb, len2);
-						request_new = true;
-					}
-					else if(handle->log)
-						lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
+					_refresh(handle, frames);
 				}
 				else
 				{
@@ -759,7 +868,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 					{
 						strncpy(ptr, uri, len2);
 						varchunk_write_advance(handle->rb, len2);
-						request_new = true;
 					}
 					else if(handle->log)
 						lv2_log_trace(&handle->logger, "eteroj#query: ringbuffer full");
@@ -768,7 +876,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 		}
 	}
 
-	if(request_new)
 	{
 		// send requests in ring buffer
 		size_t len2;
@@ -776,14 +883,19 @@ run(LV2_Handle instance, uint32_t nsamples)
 		int cnt = 0;
 		if( (ptr = varchunk_read_request(handle->rb, &len2)) && (cnt++ < 10) ) //TODO how many?
 		{
-			lv2_atom_forge_frame_time(forge, 0);
-			lv2_osc_forge_message_vararg(forge, &handle->osc_urid, ptr, "i", handle->cnt++);
+			if(handle->ref)
+				handle->ref = lv2_atom_forge_frame_time(forge, nsamples-1);
+			if(handle->ref)
+				handle->ref = lv2_osc_forge_message_vararg(forge, &handle->osc_urid, ptr, "i", handle->cnt++);
 
 			varchunk_read_advance(handle->rb);
 		}
 	}
 
-	lv2_atom_forge_pop(forge, &frame);
+	if(handle->ref)
+		lv2_atom_forge_pop(forge, &frame);
+	else
+		lv2_atom_sequence_clear(handle->osc_out);
 }
 
 static void

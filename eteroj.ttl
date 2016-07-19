@@ -190,6 +190,12 @@ eteroj:disk
 		eteroj:disk_record false ;
 	] .
 
+eteroj:query_refresh
+	a lv2:Parameter ;
+	rdfs:label "Refresh Introspection" ;
+	rdfs:comment "click to refresh introspection" ;
+	rdfs:range atom:Bool .
+
 # Query Plugin
 eteroj:query
 	a lv2:Plugin ,
@@ -197,7 +203,7 @@ eteroj:query
 	doap:name "Eteroj Query" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap ;
+	lv2:requiredFeature urid:map, urid:unmap, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, log:log ;
 
 	lv2:port [
@@ -226,6 +232,13 @@ eteroj:query
 		lv2:name "OSC Output" ;
 		lv2:designation lv2:control ;
 		rsz:minimumSize 65536 ;
+	] ;
+
+	patch:writable
+		eteroj:query_refresh ;
+
+	state:state [
+		eteroj:query_refresh false ;
 	] .
 
 # (De)Cloak Plugin
