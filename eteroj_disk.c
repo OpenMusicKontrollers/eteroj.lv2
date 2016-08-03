@@ -489,7 +489,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 		last_t = ev->time.frames;
 	}
 
-	timely_advance(&handle->timely, NULL, last_t, nsamples);
+	timely_advance(&handle->timely, NULL, last_t, nsamples-1);
 	handle->beats_upper = _beats(&handle->timely);
 
 	if(!handle->state.record && handle->rolling)
