@@ -166,6 +166,9 @@ struct _props_t {
 		LV2_URID patch_value;
 		LV2_URID patch_writable;
 		LV2_URID patch_readable;
+		LV2_URID patch_sequence;
+		LV2_URID patch_error;
+		LV2_URID patch_ack;
 
 		LV2_URID rdf_value;
 
@@ -588,7 +591,8 @@ _props_impl_search(props_t *props, LV2_URID property)
 }
 
 static inline LV2_Atom_Forge_Ref
-_props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t *impl)
+_props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
+	props_impl_t *impl, int32_t sequence_num)
 {
 	LV2_Atom_Forge_Frame obj_frame;
 
@@ -605,6 +609,14 @@ _props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 				ref = lv2_atom_forge_urid(forge, props->urid.subject);
 		}
 
+		if(sequence_num) // is optional
+		{
+			if(ref)
+				ref = lv2_atom_forge_key(forge, props->urid.patch_sequence);
+			if(ref)
+				ref = lv2_atom_forge_int(forge, sequence_num);
+		}
+
 		if(ref)
 			ref = lv2_atom_forge_key(forge, props->urid.patch_property);
 		if(ref)
@@ -614,6 +626,48 @@ _props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 			lv2_atom_forge_key(forge, props->urid.patch_value);
 		if(ref)
 			ref = impl->type->get_cb(forge, impl->value);
+	}
+	if(ref)
+		lv2_atom_forge_pop(forge, &obj_frame);
+
+	return ref;
+}
+
+static inline LV2_Atom_Forge_Ref
+_props_error(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, int32_t sequence_num)
+{
+	LV2_Atom_Forge_Frame obj_frame;
+
+	LV2_Atom_Forge_Ref ref = lv2_atom_forge_frame_time(forge, frames);
+
+	if(ref)
+		ref = lv2_atom_forge_object(forge, &obj_frame, 0, props->urid.patch_error);
+	{
+		if(ref)
+			ref = lv2_atom_forge_key(forge, props->urid.patch_sequence);
+		if(ref)
+			ref = lv2_atom_forge_int(forge, sequence_num);
+	}
+	if(ref)
+		lv2_atom_forge_pop(forge, &obj_frame);
+
+	return ref;
+}
+
+static inline LV2_Atom_Forge_Ref
+_props_ack(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, int32_t sequence_num)
+{
+	LV2_Atom_Forge_Frame obj_frame;
+
+	LV2_Atom_Forge_Ref ref = lv2_atom_forge_frame_time(forge, frames);
+
+	if(ref)
+		ref = lv2_atom_forge_object(forge, &obj_frame, 0, props->urid.patch_ack);
+	{
+		if(ref)
+			ref = lv2_atom_forge_key(forge, props->urid.patch_sequence);
+		if(ref)
+			ref = lv2_atom_forge_int(forge, sequence_num);
 	}
 	if(ref)
 		lv2_atom_forge_pop(forge, &obj_frame);
@@ -646,7 +700,8 @@ _props_set(props_t *props, props_impl_t *impl, LV2_URID type, uint32_t sz, const
 }
 
 static inline LV2_Atom_Forge_Ref
-_props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t *impl)
+_props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
+	props_impl_t *impl, int32_t sequence_num)
 {
 	const props_def_t *def = impl->def;
 	LV2_Atom_Forge_Frame obj_frame;
@@ -663,6 +718,14 @@ _props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 				ref = lv2_atom_forge_key(forge, props->urid.patch_subject);
 			if(ref)
 				ref = lv2_atom_forge_urid(forge, props->urid.subject);
+		}
+
+		if(sequence_num) // is optional
+		{
+			if(ref)
+				ref = lv2_atom_forge_key(forge, props->urid.patch_sequence);
+			if(ref)
+				ref = lv2_atom_forge_int(forge, sequence_num);
 		}
 
 		if(ref)
@@ -703,6 +766,14 @@ _props_reg(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, props_impl_t 
 			ref = lv2_atom_forge_key(forge, props->urid.patch_subject);
 		if(ref)
 			ref = lv2_atom_forge_urid(forge, impl->property);
+
+		if(sequence_num) // is optional
+		{
+			if(ref)
+				ref = lv2_atom_forge_key(forge, props->urid.patch_sequence);
+			if(ref)
+				ref = lv2_atom_forge_int(forge, sequence_num);
+		}
 
 		if(ref)
 			ref = lv2_atom_forge_key(forge, props->urid.patch_remove);
@@ -860,6 +931,9 @@ props_init(props_t *props, const size_t max_nimpls, const char *subject,
 	props->urid.patch_value = map->map(map->handle, LV2_PATCH__value);
 	props->urid.patch_writable = map->map(map->handle, LV2_PATCH__writable);
 	props->urid.patch_readable = map->map(map->handle, LV2_PATCH__readable);
+	props->urid.patch_sequence = map->map(map->handle, LV2_PATCH__sequenceNumber);
+	props->urid.patch_ack = map->map(map->handle, LV2_PATCH__Ack);
+	props->urid.patch_error = map->map(map->handle, LV2_PATCH__Error);
 
 	props->urid.rdf_value = map->map(map->handle,
 		"http://www.w3.org/1999/02/22-rdf-syntax-ns#value");
@@ -1038,16 +1112,20 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	}
 
 	if(!lv2_atom_forge_is_object_type(forge, obj->atom.type))
+	{
 		return 0;
+	}
 
 	if(obj->body.otype == props->urid.patch_get)
 	{
 		const LV2_Atom_URID *subject = NULL;
 		const LV2_Atom_URID *property = NULL;
+		const LV2_Atom_Int *sequence = NULL;
 
 		LV2_Atom_Object_Query q [] = {
 			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
 			{ props->urid.patch_property, (const LV2_Atom **)&property },
+			{ props->urid.patch_sequence, (const LV2_Atom **)&sequence },
 			LV2_ATOM_OBJECT_QUERY_END
 		};
 		lv2_atom_object_query(obj, q);
@@ -1058,6 +1136,12 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 				|| (subject->body != props->urid.subject) ) )
 		{
 			return 0;
+		}
+
+		int32_t sequence_num = 0;
+		if(sequence && (sequence->atom.type == props->urid.atom_int))
+		{
+			sequence_num = sequence->body;
 		}
 
 		if(!property)
@@ -1070,16 +1154,17 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 				if(impl->def->mode == PROP_MODE_DYNAMIC)
 				{
 					if(*ref)
-						*ref = _props_reg(props, forge, frames, impl);
+						*ref = _props_reg(props, forge, frames, impl, sequence_num);
 					if(def->event_cb && (def->event_mask & PROP_EVENT_REGISTER) )
 						def->event_cb(props->data, forge, frames, PROP_EVENT_REGISTER, impl);
 				}
 
 				if(*ref)
-					*ref = _props_get(props, forge, frames, impl);
+					*ref = _props_get(props, forge, frames, impl, sequence_num);
 				if(def->event_cb && (def->event_mask & PROP_EVENT_GET) )
 					def->event_cb(props->data, forge, frames, PROP_EVENT_GET, impl);
 			}
+
 			return 1;
 		}
 		else if(property->atom.type == props->urid.atom_urid)
@@ -1088,7 +1173,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 			if(impl)
 			{
-				*ref = _props_get(props, forge, frames, impl);
+				*ref = _props_get(props, forge, frames, impl, sequence_num);
 
 				const props_def_t *def = impl->def;
 				if(def->event_cb && (def->event_mask & PROP_EVENT_GET) )
@@ -1096,32 +1181,53 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 				return 1;
 			}
+			else if(sequence_num)
+			{
+				*ref = _props_error(props, forge, frames, sequence_num);
+			}
+		}
+		else if(sequence_num)
+		{
+			*ref = _props_error(props, forge, frames, sequence_num);
 		}
 	}
 	else if(obj->body.otype == props->urid.patch_set)
 	{
 		const LV2_Atom_URID *subject = NULL;
 		const LV2_Atom_URID *property = NULL;
+		const LV2_Atom_Int *sequence = NULL;
 		const LV2_Atom *value = NULL;
 
 		LV2_Atom_Object_Query q [] = {
 			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
 			{ props->urid.patch_property, (const LV2_Atom **)&property },
+			{ props->urid.patch_sequence, (const LV2_Atom **)&sequence },
 			{ props->urid.patch_value, &value },
 			LV2_ATOM_OBJECT_QUERY_END
 		};
 		lv2_atom_object_query(obj, q);
-
-		if(!property || (property->atom.type != props->urid.atom_urid) || !value)
-		{
-			return 0;
-		}
 
 		// check for a matching optional subject
 		if(  (subject && props->urid.subject)
 			&& ( (subject->atom.type != props->urid.atom_urid)
 				|| (subject->body != props->urid.subject) ) )
 		{
+			return 0;
+		}
+
+		int32_t sequence_num = 0;
+		if(sequence && (sequence->atom.type == props->urid.atom_int))
+		{
+			sequence_num = sequence->body;
+		}
+
+		if(!property || (property->atom.type != props->urid.atom_urid) || !value)
+		{
+			if(sequence_num)
+			{
+				*ref = _props_error(props, forge, frames, sequence_num);
+			}
+
 			return 0;
 		}
 
@@ -1134,31 +1240,53 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			if(def->event_cb && (def->event_mask & PROP_EVENT_SET) )
 				def->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 
+			if(sequence_num)
+			{
+				*ref = _props_ack(props, forge, frames, sequence_num);
+			}
+
 			return 1;
+		}
+		else if(sequence_num)
+		{
+			*ref = _props_error(props, forge, frames, sequence_num);
 		}
 	}
 	else if(obj->body.otype == props->urid.patch_put)
 	{
 		const LV2_Atom_URID *subject = NULL;
+		const LV2_Atom_Int *sequence = NULL;
 		const LV2_Atom_Object *body = NULL;
 
 		LV2_Atom_Object_Query q [] = {
 			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
+			{ props->urid.patch_sequence, (const LV2_Atom **)&sequence},
 			{ props->urid.patch_body, (const LV2_Atom **)&body },
 			LV2_ATOM_OBJECT_QUERY_END
 		};
 		lv2_atom_object_query(obj, q);
-
-		if(!body || !lv2_atom_forge_is_object_type(forge, body->atom.type))
-		{
-			return 0;
-		}
 
 		// check for a matching optional subject
 		if(  (subject && props->urid.subject)
 			&& ( (subject->atom.type != props->urid.atom_urid)
 				|| (subject->body != props->urid.subject) ) )
 		{
+			return 0;
+		}
+
+		int32_t sequence_num = 0;
+		if(sequence && (sequence->atom.type == props->urid.atom_int))
+		{
+			sequence_num = sequence->body;
+		}
+
+		if(!body || !lv2_atom_forge_is_object_type(forge, body->atom.type))
+		{
+			if(sequence_num)
+			{
+				*ref = _props_error(props, forge, frames, sequence_num);
+			}
+
 			return 0;
 		}
 
@@ -1177,6 +1305,12 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 					def->event_cb(props->data, forge, frames, PROP_EVENT_SET, impl);
 			}
 		}
+
+		if(sequence_num)
+		{
+			*ref = _props_ack(props, forge, frames, sequence_num);
+		}
+
 		return 1;
 	}
 
@@ -1193,7 +1327,7 @@ props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames, LV2_URID prope
 	{
 		_props_stash(props, impl);
 		if(*ref)
-			*ref = _props_get(props, forge, frames, impl);
+			*ref = _props_get(props, forge, frames, impl, 0); //TODO use patch:sequenceNumber
 	}
 }
 
