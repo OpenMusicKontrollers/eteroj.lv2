@@ -514,23 +514,16 @@ _type_qsort(props_type_t *a, unsigned n)
 static inline props_type_t *
 _type_bsearch(LV2_URID p, props_type_t *a, unsigned n)
 {
-	unsigned start = 0;
-	unsigned end = n;
+	props_type_t *base = a;
 
-	while(start < end)
+	for(unsigned N = n, half; N > 1; N -= half)
 	{
-		const unsigned mid = start + (end - start)/2;
-		props_type_t *dst = &a[mid];
-
-		if(p < dst->urid)
-			end = mid;
-		else if(p > dst->urid)
-			start = mid + 1;
-		else
-			return dst;
+		half = N/2;
+		props_type_t *dst = &base[half];
+		base = (dst->urid > p) ? base : dst;
 	}
 
-	return NULL;
+	return (base->urid == p) ? base : NULL;
 }
 
 static inline void
@@ -565,23 +558,16 @@ _impl_qsort(props_impl_t *a, unsigned n)
 static inline props_impl_t *
 _impl_bsearch(LV2_URID p, props_impl_t *a, unsigned n)
 {
-	unsigned start = 0;
-	unsigned end = n;
+	props_impl_t *base = a;
 
-	while(start < end)
+	for(unsigned N = n, half; N > 1; N -= half)
 	{
-		const unsigned mid = start + (end - start)/2;
-		props_impl_t *dst = &a[mid];
-
-		if(p < dst->property)
-			end = mid;
-		else if(p > dst->property)
-			start = mid + 1;
-		else
-			return dst;
+		half = N/2;
+		props_impl_t *dst = &base[half];
+		base = (dst->property > p) ? base : dst;
 	}
 
-	return NULL;
+	return (base->property == p) ? base : NULL;
 }
 
 static inline props_impl_t *
