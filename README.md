@@ -8,7 +8,7 @@ Get more information at: [http://open-music-kontrollers.ch/lv2/eteroj](http://op
 
 ### Build status
 
-[![Build Status](https://travis-ci.org/OpenMusicKontrollers/eteroj.lv2.svg)](https://travis-ci.org/OpenMusicKontrollers/eteroj.lv2)
+[![build status](https://gitlab.com/OpenMusicKontrollers/moony.lv2/badges/master/build.svg)](https://gitlab.com/OpenMusicKontrollers/moony.lv2/commits/master)
 
 ### Dependencies
 
