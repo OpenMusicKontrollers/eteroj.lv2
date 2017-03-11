@@ -19,9 +19,6 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
 set(STATIC_UV "/opt/${TOOLCHAIN}/lib/libuv.a")
-set(STATIC_SRATOM "/opt/${TOOLCHAIN}/lib/libsratom-0.a")
-set(STATIC_SERD "/opt/${TOOLCHAIN}/lib/libserd-0.a")
-set(STATIC_SORD "/opt/${TOOLCHAIN}/lib/libsord-0.a")
 set(LIBS ${LIBS} "-static-libgcc -lws2_32 -lpsapi -liphlpapi -Wl,-Bstatic -lwinpthread -luserenv")
 
 set(WINE wine32)

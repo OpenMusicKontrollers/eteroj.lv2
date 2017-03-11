@@ -23,7 +23,7 @@
 #include <osc.lv2/util.h>
 #include <osc.lv2/forge.h>
 
-#include <sratom/sratom.h>
+#include <netatom.lv2/netatom.h>
 
 #define NS_RDF "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define BUF_SIZE 8192
@@ -50,15 +50,14 @@ struct _plughandle_t {
 	LV2_OSC_URID osc_urid;
 	int64_t frames;
 
-	Sratom *sratom;
-	SerdNode subject;
-	SerdNode predicate;
+	netatom_t *netatom_tx;
+	netatom_t *netatom_rx;
 
 	varchunk_t *to_worker;
 	varchunk_t *from_worker;
 };
 		
-static const char *base_uri = "file:///tmp/base";
+static const char *base_path = "/ninja";
 
 static inline LV2_Atom_Forge_Ref
 _sink(LV2_Atom_Forge_Sink_Handle handle, const void *buf, uint32_t size)
@@ -137,15 +136,15 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 
-	handle->sratom = sratom_new(handle->map);
-	if(!handle->sratom)
+	handle->netatom_tx= netatom_new(handle->map, handle->unmap, true);
+	handle->netatom_rx= netatom_new(handle->map, handle->unmap, true);
+	if(!handle->netatom_tx || !handle->netatom_rx)
 	{
+		netatom_free(handle->netatom_tx);
+		netatom_free(handle->netatom_rx);
 		free(handle);
 		return NULL;
 	}
-
-	handle->subject = serd_node_from_string(SERD_URI, (const uint8_t*)(""));
-	handle->predicate = serd_node_from_string(SERD_URI, (const uint8_t*)(NS_RDF"value"));
 
 	handle->to_worker = varchunk_new(BUF_SIZE, true);
 	handle->from_worker = varchunk_new(BUF_SIZE, true);
@@ -187,21 +186,19 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 	plughandle_t *handle = data;
 	LV2_Atom_Forge *forge = &handle->forge;
 
-	if(strcmp(path, "/ttl"))
+	if(strcmp(path, base_path))
 		return;
 
 	const LV2_Atom *itr = lv2_atom_tuple_begin(arguments);
-	if(itr->type != forge->String)
+	if(itr->type != forge->Chunk)
 		return;
 
-	LV2_Atom *atom = sratom_from_turtle(handle->sratom, base_uri,
-		&handle->subject, &handle->predicate, LV2_ATOM_BODY_CONST(itr));
+	const LV2_Atom *atom = netatom_deserialize(handle->netatom_rx,
+		LV2_ATOM_BODY_CONST(itr), itr->size);
 	if(atom)
 	{
 		lv2_atom_forge_frame_time(forge, handle->frames);
 		lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
-
-		free(atom);
 	}
 }
 
@@ -254,7 +251,8 @@ cleanup(LV2_Handle instance)
 		varchunk_free(handle->to_worker);
 	if(handle->from_worker)
 		varchunk_free(handle->from_worker);
-	sratom_free(handle->sratom);
+	netatom_free(handle->netatom_rx);
+	netatom_free(handle->netatom_tx);
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
 }
@@ -297,16 +295,12 @@ _work(LV2_Handle instance,
 			}
 			else
 			{
-				char *ttl = sratom_to_turtle(handle->sratom, handle->unmap, base_uri,
-					&handle->subject, &handle->predicate,
-					atom->type, atom->size, LV2_ATOM_BODY_CONST(atom));
-
-				if(ttl)
+				uint32_t sz;
+				const uint8_t *buf = netatom_serialize(handle->netatom_tx, atom, &sz);
+				if(buf)
 				{
 					lv2_atom_forge_frame_time(forge, ev->time.frames);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, "/ttl", "s", ttl);
-
-					free(ttl);
+					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, base_path, "b", sz, buf);
 				}
 			}
 		}
