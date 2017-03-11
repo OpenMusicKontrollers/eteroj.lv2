@@ -16,7 +16,7 @@
  */
 
 #include <time.h>
-#include <netatom.h>
+#include <netatom.lv2/netatom.h>
 #include <sratom/sratom.h>
 
 #define MAX_URIDS 2048

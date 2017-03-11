@@ -24,7 +24,8 @@ extern "C" {
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <endian.h>
+
+#include <netatom.lv2/endian.h>
 
 #include <lv2/lv2plug.in/ns/ext/atom/atom.h>
 #include <lv2/lv2plug.in/ns/ext/atom/forge.h>
