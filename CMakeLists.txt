@@ -42,6 +42,9 @@ else()
 	set(LIBS ${LIBS} ${UV_LDFLAGS})
 endif()
 
+pkg_search_module(LV2 REQUIRED lv2>=1.10.0)
+include_directories(${LV2_INCLUDE_DIRS})
+
 # eteroj
 add_library(eteroj MODULE
 	eteroj.c
