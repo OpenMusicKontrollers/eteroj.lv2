@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016 Hanspeter Portner (dev@open-music-kontrollers.ch)
+ * Copyright (c) 2015-2017 Hanspeter Portner (dev@open-music-kontrollers.ch)
  *
  * This is free software: you can redistribute it and/or modify
  * it under the terms of the Artistic License 2.0 as published by
@@ -48,6 +48,9 @@ static inline void
 varchunk_free(varchunk_t *varchunk);
 
 static inline void *
+varchunk_write_request_max(varchunk_t *varchunk, size_t minimum, size_t *maximum);
+
+static inline void *
 varchunk_write_request(varchunk_t *varchunk, size_t minimum);
 
 static inline void
@@ -81,8 +84,8 @@ struct _varchunk_t {
 	memory_order acquire;
 	memory_order release;
 
-  _Atomic size_t head;
-  _Atomic size_t tail;
+  atomic_size_t head;
+  atomic_size_t tail;
 
   void *buf;
 }; 
@@ -159,16 +162,9 @@ _varchunk_write_advance_raw(varchunk_t *varchunk, size_t head, size_t written)
 }
 
 static inline void *
-varchunk_write_request(varchunk_t *varchunk, size_t minimum)
+varchunk_write_request_max(varchunk_t *varchunk, size_t minimum, size_t *maximum)
 {
 	assert(varchunk);
-
-	if(minimum == 0)
-	{
-		varchunk->rsvd = 0;
-		varchunk->gapd = 0;
-		return NULL;
-	}
 
 	size_t space; // size of writable buffer
 	size_t end; // virtual end of writable buffer
@@ -201,19 +197,25 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 			{
 				varchunk->rsvd = 0;
 				varchunk->gapd = 0;
+				if(maximum)
+					*maximum = varchunk->rsvd;
 				return NULL;
 			}
 			else // enough space left on second buffer, use it!
 			{
-				varchunk->rsvd = minimum;
+				varchunk->rsvd = len2;
 				varchunk->gapd = len1;
+				if(maximum)
+					*maximum = varchunk->rsvd;
 				return buf2 + sizeof(varchunk_elmnt_t);
 			}
 		}
 		else // enough space left on first part of buffer, use it!
 		{
-			varchunk->rsvd = minimum;
+			varchunk->rsvd = len1;
 			varchunk->gapd = 0;
+			if(maximum)
+				*maximum = varchunk->rsvd;
 			return buf1 + sizeof(varchunk_elmnt_t);
 		}
 	}
@@ -225,15 +227,25 @@ varchunk_write_request(varchunk_t *varchunk, size_t minimum)
 		{
 			varchunk->rsvd = 0;
 			varchunk->gapd = 0;
+			if(maximum)
+				*maximum = varchunk->rsvd;
 			return NULL;
 		}
 		else // enough space left on contiguous buffer, use it!
 		{
-			varchunk->rsvd = minimum;
+			varchunk->rsvd = space;
 			varchunk->gapd = 0;
+			if(maximum)
+				*maximum = varchunk->rsvd;
 			return buf + sizeof(varchunk_elmnt_t);
 		}
 	}
+}
+
+static inline void *
+varchunk_write_request(varchunk_t *varchunk, size_t minimum)
+{
+	return varchunk_write_request_max(varchunk, minimum, NULL);
 }
 
 static inline void

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2016 Hanspeter Portner (dev@open-music-kontrollers.ch)
+ * Copyright (c) 2015-2017 Hanspeter Portner (dev@open-music-kontrollers.ch)
  *
  * This is free software: you can redistribute it and/or modify
  * it under the terms of the Artistic License 2.0 as published by
@@ -17,6 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -46,13 +47,16 @@ producer_main(void *arg)
 
 		written = rand() * 1024.f / RAND_MAX;
 
-		if( (ptr = varchunk_write_request(varchunk, written)) )
+		size_t maximum;
+		if( (ptr = varchunk_write_request_max(varchunk, written, &maximum)) )
 		{
+			if(maximum < written)
+				exit(-1);
 			end = ptr + written;
 			for(void *src=ptr; src<end; src+=sizeof(uint64_t))
 				*(uint64_t *)src = cnt;
 			varchunk_write_advance(varchunk, written);
-			//fprintf(stdout, "P %u %zu\n", cnt, written);
+			//fprintf(stdout, "P %"PRIu64" %zu %zu\n", cnt, written, maximum);
 			cnt++;
 		}
 		else
@@ -85,7 +89,7 @@ consumer_main(void *arg)
 				if(*(const uint64_t *)src != cnt)
 					exit(-1); // TEST FAILED
 			varchunk_read_advance(varchunk);
-			//fprintf(stdout, "C %u %zu\n", cnt, toread);
+			//fprintf(stdout, "C %"PRIu64" %zu\n", cnt, toread);
 			cnt++;
 		}
 		else
