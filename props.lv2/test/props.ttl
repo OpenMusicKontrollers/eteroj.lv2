@@ -108,7 +108,7 @@ props:test
 	lv2:project proj:props ;
 	lv2:extensionData	state:interface ;
 	lv2:requiredFeature urid:map, log:log, state:loadDefaultState ;
-	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore ;
 
 	lv2:port [
 		# sink event port
