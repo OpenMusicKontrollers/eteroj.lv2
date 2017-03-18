@@ -746,7 +746,7 @@ _work(LV2_Handle instance,
 
 		default:
 		{
-			props_work(&handle->props, respond, worker, size, body); //FIXME
+			//props_work(&handle->props, respond, worker, size, body); //FIXME
 			break;
 		}
 	}

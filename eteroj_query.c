@@ -25,7 +25,7 @@
 #include <props.h>
 #include <jsmn.h>
 
-#define MAX_NPROPS 2
+#define MAX_NPROPS 1
 #define MAX_TOKENS 256
 
 typedef struct _plugstate_t plugstate_t;
@@ -388,8 +388,11 @@ _intercept_refresh(void *data, LV2_Atom_Forge *forge, int64_t frames,
 
 	_refresh(handle, frames);
 
-	handle->state.query_refresh = false;
-	props_set(&handle->props, forge, frames, handle->urid.query_refresh, &handle->ref);
+	if(forge)
+	{
+		handle->state.query_refresh = false;
+		props_set(&handle->props, forge, frames, handle->urid.query_refresh, &handle->ref);
+	}
 }
 
 static const props_def_t defs [MAX_NPROPS] = {
@@ -933,6 +936,64 @@ cleanup(LV2_Handle instance)
 		varchunk_free(handle->rb);
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
+}
+
+static LV2_State_Status
+_state_save(LV2_Handle instance, LV2_State_Store_Function store,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	return props_save(&handle->props, store, state, flags, features);
+}
+
+static LV2_State_Status
+_state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	return props_restore(&handle->props, retrieve, state, flags, features);
+}
+
+static const LV2_State_Interface state_iface = {
+	.save = _state_save,
+	.restore = _state_restore
+};
+
+static inline LV2_Worker_Status
+_work(LV2_Handle instance, LV2_Worker_Respond_Function respond,
+LV2_Worker_Respond_Handle worker, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	return props_work(&handle->props, respond, worker, size, body);
+}
+
+static inline LV2_Worker_Status
+_work_response(LV2_Handle instance, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	return props_work_response(&handle->props, size, body);
+}
+
+static const LV2_Worker_Interface work_iface = {
+	.work = _work,
+	.work_response = _work_response,
+	.end_run = NULL
+};
+
+static const void *
+extension_data(const char *uri)
+{
+	if(!strcmp(uri, LV2_STATE__interface))
+		return &state_iface;
+	else if(!strcmp(uri, LV2_WORKER__interface))
+		return &work_iface;
+	return NULL;
 }
 
 const LV2_Descriptor eteroj_query = {

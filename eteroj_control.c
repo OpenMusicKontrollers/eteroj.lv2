@@ -83,10 +83,12 @@ _intercept_learn(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		handle->learning = true;
 
 		handle->state.min[i] = MAX_VAL;
-		props_set(&handle->props, forge, frames, handle->urid.min[i], &handle->ref);
+		if(forge)
+			props_set(&handle->props, forge, frames, handle->urid.min[i], &handle->ref);
 
 		handle->state.max[i] = MIN_VAL;
-		props_set(&handle->props, forge, frames, handle->urid.max[i], &handle->ref);
+		if(forge)
+			props_set(&handle->props, forge, frames, handle->urid.max[i], &handle->ref);
 	}
 }
 
