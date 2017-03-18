@@ -126,10 +126,15 @@ _netatom_ser_uri(netatom_t *netatom, uint32_t *urid, const char *uri)
 	{
 		if(!uri)
 			uri = netatom->unmap->unmap(netatom->unmap->handle, *urid);
-		const uint32_t size = strlen(uri) + 1;
+		if(!uri) // invalid urid
+			*urid = 0;
+		else
+		{
+			const uint32_t size = strlen(uri) + 1;
 
-		*urid = lv2_atom_forge_atom(&netatom->dict.forge, size, *urid);
-		lv2_atom_forge_write(&netatom->dict.forge, uri, size);
+			*urid = lv2_atom_forge_atom(&netatom->dict.forge, size, *urid);
+			lv2_atom_forge_write(&netatom->dict.forge, uri, size);
+		}
 	}
 
 	if(netatom->swap)
