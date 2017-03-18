@@ -392,13 +392,14 @@ _intercept_refresh(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	props_set(&handle->props, forge, frames, handle->urid.query_refresh, &handle->ref);
 }
 
-static const props_def_t query_refresh_def = {
-	.property = ETEROJ_QUERY_REFRESH_URI,
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Bool,
-	.mode = PROP_MODE_STATIC,
-	.event_mask = PROP_EVENT_WRITE,
-	.event_cb = _intercept_refresh
+static const props_def_t defs [MAX_NPROPS] = {
+	{
+		.property = ETEROJ_QUERY_REFRESH_URI,
+		.offset = offsetof(plugstate_t, query_refresh),
+		.type = LV2_ATOM__Bool,
+		.event_mask = PROP_EVENT_WRITE,
+		.event_cb = _intercept_refresh
+	}
 };
 
 static LV2_Handle
@@ -497,12 +498,13 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	if( !(handle->urid.query_refresh =
-			props_register(&handle->props, &query_refresh_def, &handle->state.query_refresh, &handle->stash.query_refresh)))
+	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
 	{
 		free(handle);
 		return NULL;
 	}
+
+	handle->urid.query_refresh = props_map(&handle->props, ETEROJ_QUERY_REFRESH_URI);
 
 	return handle;
 }

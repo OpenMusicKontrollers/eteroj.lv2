@@ -185,21 +185,21 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 		_trigger_open_play(handle);
 }
 
-static const props_def_t record_def = {
-	.property = ETEROJ_DISK_RECORD_URI,
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Bool,
-	.mode = PROP_MODE_STATIC,
-	.event_mask = PROP_EVENT_WRITE,
-	.event_cb = _intercept
-};
-
-static const props_def_t path_def = {
-	.property = ETEROJ_DISK_PATH_URI,
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Path,
-	.mode = PROP_MODE_STATIC,
-	.max_size = MAX_STRLEN 
+static const props_def_t defs [MAX_NPROPS] = {
+	{
+		.property = ETEROJ_DISK_RECORD_URI,
+		.offset = offsetof(plugstate_t, record),
+		.type = LV2_ATOM__Bool,
+		.event_mask = PROP_EVENT_WRITE,
+		.event_cb = _intercept
+	},
+	{
+		.property = ETEROJ_DISK_PATH_URI,
+		.offset = offsetof(plugstate_t, path),
+		.access = LV2_PATCH__readable,
+		.type = LV2_ATOM__Path,
+		.max_size = MAX_STRLEN 
+	}
 };
 
 static inline void
@@ -418,13 +418,11 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	if(  !props_register(&handle->props, &record_def, &handle->state.record, &handle->stash.record)
-		|| !props_register(&handle->props, &path_def, handle->state.path, handle->stash.path))
+	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
 	{
 		free(handle);
 		return NULL;
 	}
-
 
 	return handle;
 }
@@ -546,7 +544,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(&handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -556,7 +554,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
@@ -568,7 +566,7 @@ static const LV2_State_Interface state_iface = {
 static LV2_Worker_Status
 _work(LV2_Handle instance,
 	LV2_Worker_Respond_Function respond,
-	LV2_Worker_Respond_Handle target,
+	LV2_Worker_Respond_Handle worker,
 	uint32_t size,
 	const void *body)
 {
@@ -745,6 +743,12 @@ _work(LV2_Handle instance,
 
 			break;
 		}
+
+		default:
+		{
+			props_work(&handle->props, respond, worker, size, body); //FIXME
+			break;
+		}
 	}
 
 	return LV2_WORKER_SUCCESS;
@@ -756,26 +760,13 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	//TODO
-
-	return LV2_WORKER_SUCCESS;
-}
-
-// rt-thread
-static LV2_Worker_Status
-_end_run(LV2_Handle instance)
-{
-	plughandle_t *handle = instance;
-
-	//TODO
-
-	return LV2_WORKER_SUCCESS;
+	return props_work_response(&handle->props, size, body); //FIXME
 }
 
 static const LV2_Worker_Interface work_iface = {
 	.work = _work,
 	.work_response = _work_response,
-	.end_run = _end_run
+	.end_run = NULL
 };
 
 static const void*

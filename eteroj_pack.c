@@ -60,19 +60,18 @@ struct _plughandle_t {
 	LV2_Atom_Forge_Ref ref;
 };
 
-static const props_def_t pack_path_def = {
-	.property = ETEROJ_PACK_PATH_URI,
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_STATIC,
-	.max_size = MAX_STRLEN
-};
-
-static const props_def_t pack_format_def = {
-	.property = ETEROJ_PACK_FORMAT_URI,
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_STATIC
+static const props_def_t defs [MAX_NPROPS] = {
+	{
+		.property = ETEROJ_PACK_PATH_URI,
+		.offset = offsetof(plugstate_t, pack_path),
+		.type = LV2_ATOM__String,
+		.max_size = MAX_STRLEN
+	},
+	{
+		.property = ETEROJ_PACK_FORMAT_URI,
+		.offset = offsetof(plugstate_t, pack_format),
+		.type = LV2_ATOM__Int,
+	}
 };
 
 static LV2_Handle
@@ -106,8 +105,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate, const char *bundle_pa
 		return NULL;
 	}
 
-	if(  !props_register(&handle->props, &pack_path_def, handle->state.pack_path, handle->stash.pack_path)
-		|| !props_register(&handle->props, &pack_format_def, &handle->state.pack_format, &handle->stash.pack_format) )
+	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
 	{
 		free(handle);
 		return NULL;
@@ -257,7 +255,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(&handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -267,7 +265,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
@@ -275,12 +273,36 @@ static const LV2_State_Interface state_iface = {
 	.restore = _state_restore
 };
 
-static const void*
-extension_data(const char* uri)
+static inline LV2_Worker_Status
+_work(LV2_Handle instance, LV2_Worker_Respond_Function respond,
+LV2_Worker_Respond_Handle worker, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	return props_work(&handle->props, respond, worker, size, body);
+}
+
+static inline LV2_Worker_Status
+_work_response(LV2_Handle instance, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	return props_work_response(&handle->props, size, body);
+}
+
+static const LV2_Worker_Interface work_iface = {
+	.work = _work,
+	.work_response = _work_response,
+	.end_run = NULL
+};
+
+static const void *
+extension_data(const char *uri)
 {
 	if(!strcmp(uri, LV2_STATE__interface))
 		return &state_iface;
-
+	else if(!strcmp(uri, LV2_WORKER__interface))
+		return &work_iface;
 	return NULL;
 }
 

@@ -94,8 +94,6 @@ struct _plughandle_t {
 	uv_loop_t loop;
 
 	LV2_Worker_Schedule *sched;
-	LV2_Worker_Respond_Function respond;
-	LV2_Worker_Respond_Handle target;
 
 	LV2_OSC_Schedule *osc_sched;
 	list_t *list;
@@ -138,7 +136,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(&handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -148,7 +146,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
@@ -160,7 +158,7 @@ static const LV2_State_Interface state_iface = {
 static LV2_Worker_Status
 _work(LV2_Handle instance,
 	LV2_Worker_Respond_Function respond,
-	LV2_Worker_Respond_Handle target,
+	LV2_Worker_Respond_Handle worker,
 	uint32_t size,
 	const void *body)
 {
@@ -173,9 +171,6 @@ _work(LV2_Handle instance,
 
 		handle->reconnection_requested = false;
 	}
-
-	handle->respond = respond;
-	handle->target = target;
 
 	LV2_OSC_Reader reader;
 	LV2_OSC_Arg arg;
@@ -201,11 +196,12 @@ _work(LV2_Handle instance,
 		else
 			handle->reconnection_requested = true;
 	}
+	else
+	{
+		props_work(&handle->props, respond, worker, size, body); //FIXME
+	}
 
 	uv_run(&handle->loop, UV_RUN_NOWAIT);
-
-	handle->respond = NULL;
-	handle->target = NULL;
 
 	return LV2_WORKER_SUCCESS;
 }
@@ -216,26 +212,13 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	// do nothing
-
-	return LV2_WORKER_SUCCESS;
-}
-
-// rt-thread
-static LV2_Worker_Status
-_end_run(LV2_Handle instance)
-{
-	plughandle_t *handle = instance;
-
-	// do nothing
-
-	return LV2_WORKER_SUCCESS;
+	return props_work_response(&handle->props, size, body); //FIXME
 }
 
 static const LV2_Worker_Interface work_iface = {
 	.work = _work,
 	.work_response = _work_response,
-	.end_run = _end_run
+	.end_run = NULL
 };
 
 // non-rt
@@ -297,32 +280,31 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	_url_change(handle, impl->value);
+	_url_change(handle, impl->value.body);
 }
 
-static const props_def_t url_def = {
-	.property = ETEROJ_URL_URI,
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_STATIC,
-	.max_size = 512,
-	.event_mask = PROP_EVENT_WRITE,
-	.event_cb = _intercept
-};
-
-static const props_def_t status_def = {
-	.property = ETEROJ_STAT_URI,
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t error_def = {
-	.property = ETEROJ_ERR_URI,
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_STATIC,
-	.max_size = 512,
+static const props_def_t defs [MAX_NPROPS] = {
+	{
+		.property = ETEROJ_URL_URI,
+		.offset = offsetof(plugstate_t, osc_url),
+		.type = LV2_ATOM__String,
+		.max_size = 512,
+		.event_mask = PROP_EVENT_WRITE,
+		.event_cb = _intercept
+	},
+	{
+		.property = ETEROJ_STAT_URI,
+		.offset = offsetof(plugstate_t, osc_status),
+		.access = LV2_PATCH__readable,
+		.type = LV2_ATOM__Int,
+	},
+	{
+		.property = ETEROJ_ERR_URI,
+		.offset = offsetof(plugstate_t, osc_error),
+		.access = LV2_PATCH__readable,
+		.type = LV2_ATOM__String,
+		.max_size = 512,
+	}
 };
 
 static LV2_Handle
@@ -387,7 +369,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.free = _data_free;
 
 	handle->state.osc_status = STATE_IDLE;
-	strcpy(handle->state.osc_error, "");
+	strncpy(handle->state.osc_error, "", 512);
 
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
@@ -395,13 +377,14 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	if(  !props_register(&handle->props, &url_def, handle->state.osc_url, handle->stash.osc_url)
-		|| !(handle->uris.eteroj_stat = props_register(&handle->props, &status_def, &handle->state.osc_status, &handle->stash.osc_status))
-		|| !(handle->uris.eteroj_err = props_register(&handle->props, &error_def, handle->state.osc_error, handle->stash.osc_error)))
+	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
 	{
 		free(handle);
 		return NULL;
 	}
+
+	handle->uris.eteroj_stat = props_map(&handle->props, ETEROJ_STAT_URI);
+	handle->uris.eteroj_err = props_map(&handle->props, ETEROJ_ERR_URI);
 
 	uv_loop_init(&handle->loop);
 
@@ -465,7 +448,7 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 	if(!strcmp(arg.path, "/stream/resolve"))
 	{
 		handle->state.osc_status = STATE_READY;
-		sprintf(handle->state.osc_error, "");
+		snprintf(handle->state.osc_error, 512, "");
 
 		handle->needs_flushing = true;
 		handle->status_updated = true;
@@ -473,7 +456,7 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 	else if(!strcmp(arg.path, "/stream/timeout"))
 	{
 		handle->state.osc_status = STATE_TIMEDOUT;
-		sprintf(handle->state.osc_error, "");
+		snprintf(handle->state.osc_error, 512, "");
 
 		handle->status_updated = true;
 	}
@@ -483,14 +466,14 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 		const char *what = lv2_osc_reader_arg_next(&reader, &arg)->s;
 
 		handle->state.osc_status = STATE_ERRORED;
-		sprintf(handle->state.osc_error, "%s (%s)\n", where, what);
+		snprintf(handle->state.osc_error, 512, "%s (%s)\n", where, what);
 
 		handle->status_updated = true;
 	}
 	else if(!strcmp(arg.path, "/stream/connect"))
 	{
 		handle->state.osc_status = STATE_CONNECTED;
-		sprintf(handle->state.osc_error, "");
+		snprintf(handle->state.osc_error, 512, "");
 
 		handle->needs_flushing = true;
 		handle->status_updated = true;
@@ -498,7 +481,7 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 	else if(!strcmp(arg.path, "/stream/disconnect"))
 	{
 		handle->state.osc_status = STATE_READY;
-		sprintf(handle->state.osc_error, "");
+		snprintf(handle->state.osc_error, 512, "");
 
 		handle->status_updated = true;
 	}

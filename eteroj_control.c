@@ -76,7 +76,7 @@ _intercept_learn(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (int32_t *)impl->value  - handle->state.learn;
+	const int i = (int32_t *)impl->value.body - handle->state.learn;
 
 	if(handle->state.learn[i]) // set to learn
 	{
@@ -111,7 +111,7 @@ _intercept_min(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (double *)impl->value  - handle->state.min;
+	const int i = (double *)impl->value.body - handle->state.min;
 	_update_divider(handle, i);
 	_update_value(handle, i);
 }
@@ -122,7 +122,7 @@ _intercept_max(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (double *)impl->value  - handle->state.max;
+	const int i = (double *)impl->value.body - handle->state.max;
 	_update_divider(handle, i);
 	_update_value(handle, i);
 }
@@ -133,112 +133,99 @@ _intercept_raw(void *data, LV2_Atom_Forge *forge, int64_t frames,
 {
 	plughandle_t *handle = data;
 
-	const int i = (double *)impl->value  - handle->state.raw;
+	const int i = (double *)impl->value.body - handle->state.raw;
 	_update_value(handle, i);
 }
 
 #define STAT_LEARN(NUM) \
 { \
 	.property = ETEROJ_CONTROL_URI"_learn_"#NUM, \
-	.access = LV2_PATCH__writable, \
+	.offset = offsetof(plugstate_t, learn) + (NUM-1)*sizeof(int32_t), \
 	.type = LV2_ATOM__Bool, \
-	.mode = PROP_MODE_STATIC, \
 	.event_mask = PROP_EVENT_WRITE, \
 	.event_cb = _intercept_learn \
 }
 
-static const props_def_t stat_learn [MAX_SLOTS] = {
-	[0] = STAT_LEARN(1),
-	[1] = STAT_LEARN(2),
-	[2] = STAT_LEARN(3),
-	[3] = STAT_LEARN(4),
-	[4] = STAT_LEARN(5),
-	[5] = STAT_LEARN(6),
-	[6] = STAT_LEARN(7),
-	[7] = STAT_LEARN(8)
-};
-
 #define STAT_PATH(NUM) \
 { \
 	.property = ETEROJ_CONTROL_URI"_path_"#NUM, \
-	.access = LV2_PATCH__writable, \
+	.offset = offsetof(plugstate_t, path) + (NUM-1)*MAX_STRLEN, \
 	.type = LV2_ATOM__String, \
-	.mode = PROP_MODE_STATIC, \
 	.max_size = MAX_STRLEN \
 }
-
-static const props_def_t stat_path [MAX_SLOTS] = {
-	[0] = STAT_PATH(1),
-	[1] = STAT_PATH(2),
-	[2] = STAT_PATH(3),
-	[3] = STAT_PATH(4),
-	[4] = STAT_PATH(5),
-	[5] = STAT_PATH(6),
-	[6] = STAT_PATH(7),
-	[7] = STAT_PATH(8)
-};
 
 #define STAT_MIN(NUM) \
 { \
 	.property = ETEROJ_CONTROL_URI"_min_"#NUM, \
-	.access = LV2_PATCH__writable, \
+	.offset = offsetof(plugstate_t, min) + (NUM-1)*sizeof(double), \
 	.type = LV2_ATOM__Double, \
-	.mode = PROP_MODE_STATIC, \
 	.event_mask = PROP_EVENT_WRITE, \
 	.event_cb = _intercept_min \
 }
 
-static const props_def_t stat_min [MAX_SLOTS] = {
-	[0] = STAT_MIN(1),
-	[1] = STAT_MIN(2),
-	[2] = STAT_MIN(3),
-	[3] = STAT_MIN(4),
-	[4] = STAT_MIN(5),
-	[5] = STAT_MIN(6),
-	[6] = STAT_MIN(7),
-	[7] = STAT_MIN(8)
-};
-
 #define STAT_MAX(NUM) \
 { \
 	.property = ETEROJ_CONTROL_URI"_max_"#NUM, \
-	.access = LV2_PATCH__writable, \
+	.offset = offsetof(plugstate_t, max) + (NUM-1)*sizeof(double), \
 	.type = LV2_ATOM__Double, \
-	.mode = PROP_MODE_STATIC, \
 	.event_mask = PROP_EVENT_WRITE, \
 	.event_cb = _intercept_max \
 }
 
-static const props_def_t stat_max [MAX_SLOTS] = {
-	[0] = STAT_MAX(1),
-	[1] = STAT_MAX(2),
-	[2] = STAT_MAX(3),
-	[3] = STAT_MAX(4),
-	[4] = STAT_MAX(5),
-	[5] = STAT_MAX(6),
-	[6] = STAT_MAX(7),
-	[7] = STAT_MAX(8)
-};
-
 #define STAT_RAW(NUM) \
 { \
 	.property = ETEROJ_CONTROL_URI"_raw_"#NUM, \
-	.access = LV2_PATCH__writable, \
+	.offset = offsetof(plugstate_t, raw) + (NUM-1)*sizeof(double), \
 	.type = LV2_ATOM__Double, \
-	.mode = PROP_MODE_STATIC, \
 	.event_mask = PROP_EVENT_RESTORE, \
 	.event_cb = _intercept_raw \
 }
 
-static const props_def_t stat_raw [MAX_SLOTS] = {
-	[0] = STAT_RAW(1),
-	[1] = STAT_RAW(2),
-	[2] = STAT_RAW(3),
-	[3] = STAT_RAW(4),
-	[4] = STAT_RAW(5),
-	[5] = STAT_RAW(6),
-	[6] = STAT_RAW(7),
-	[7] = STAT_RAW(8)
+static const props_def_t defs [MAX_NPROPS] = {
+	STAT_LEARN(1),
+	STAT_LEARN(2),
+	STAT_LEARN(3),
+	STAT_LEARN(4),
+	STAT_LEARN(5),
+	STAT_LEARN(6),
+	STAT_LEARN(7),
+	STAT_LEARN(8),
+
+	STAT_PATH(1),
+	STAT_PATH(2),
+	STAT_PATH(3),
+	STAT_PATH(4),
+	STAT_PATH(5),
+	STAT_PATH(6),
+	STAT_PATH(7),
+	STAT_PATH(8),
+
+	STAT_MIN(1),
+	STAT_MIN(2),
+	STAT_MIN(3),
+	STAT_MIN(4),
+	STAT_MIN(5),
+	STAT_MIN(6),
+	STAT_MIN(7),
+	STAT_MIN(8),
+
+	STAT_MAX(1),
+	STAT_MAX(2),
+	STAT_MAX(3),
+	STAT_MAX(4),
+	STAT_MAX(5),
+	STAT_MAX(6),
+	STAT_MAX(7),
+	STAT_MAX(8),
+
+	STAT_RAW(1),
+	STAT_RAW(2),
+	STAT_RAW(3),
+	STAT_RAW(4),
+	STAT_RAW(5),
+	STAT_RAW(6),
+	STAT_RAW(7),
+	STAT_RAW(8),
 };
 
 static LV2_Handle
@@ -272,29 +259,20 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	bool success = true;
-	for(unsigned i=0; i<MAX_SLOTS; i++)
+	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
 	{
-		handle->urid.learn[i] = props_register(&handle->props, &stat_learn[i],
-			&handle->state.learn[i], &handle->stash.learn[i]);
-		handle->urid.path[i] = props_register(&handle->props, &stat_path[i],
-			handle->state.path[i], handle->stash.path[i]);
-		handle->urid.min[i] = props_register(&handle->props, &stat_min[i],
-			&handle->state.min[i], &handle->stash.min[i]);
-		handle->urid.max[i] = props_register(&handle->props, &stat_max[i],
-			&handle->state.max[i], &handle->stash.max[i]);
-		handle->urid.raw[i] = props_register(&handle->props, &stat_raw[i],
-			&handle->state.raw[i], &handle->stash.raw[i]);
-
-		if(  !handle->urid.learn[i] || !handle->urid.path[i]
-			|| !handle->urid.min[i] || !handle->urid.max[i] || !handle->urid.raw[i])
-			success = false;
-	}
-
-	if(!success)
-	{
+		fprintf(stderr, "failed to init property structure\n");
 		free(handle);
 		return NULL;
+	}
+
+	for(unsigned i=0; i<MAX_SLOTS; i++)
+	{
+		handle->urid.learn[i] = props_map(&handle->props, defs[0*MAX_SLOTS + i].property);
+		handle->urid.path[i] = props_map(&handle->props, defs[1*MAX_SLOTS + i].property);
+		handle->urid.min[i] = props_map(&handle->props, defs[2*MAX_SLOTS + i].property);
+		handle->urid.max[i] = props_map(&handle->props, defs[3*MAX_SLOTS + i].property);
+		handle->urid.raw[i] = props_map(&handle->props, defs[4*MAX_SLOTS + i].property);
 	}
 
 	return handle;
@@ -442,9 +420,9 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 	LV2_State_Handle state, uint32_t flags,
 	const LV2_Feature *const *features)
 {
-	plughandle_t *handle = instance;
+	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(&handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -452,9 +430,9 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 	LV2_State_Handle state, uint32_t flags,
 	const LV2_Feature *const *features)
 {
-	plughandle_t *handle = instance;
+	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(&handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, retrieve, state, flags, features);
 }
 
 static const LV2_State_Interface state_iface = {
@@ -462,11 +440,36 @@ static const LV2_State_Interface state_iface = {
 	.restore = _state_restore
 };
 
+static inline LV2_Worker_Status
+_work(LV2_Handle instance, LV2_Worker_Respond_Function respond,
+LV2_Worker_Respond_Handle worker, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	return props_work(&handle->props, respond, worker, size, body);
+}
+
+static inline LV2_Worker_Status
+_work_response(LV2_Handle instance, uint32_t size, const void *body)
+{
+	plughandle_t *handle = instance;
+
+	return props_work_response(&handle->props, size, body);
+}
+
+static const LV2_Worker_Interface work_iface = {
+	.work = _work,
+	.work_response = _work_response,
+	.end_run = NULL
+};
+
 static const void *
 extension_data(const char *uri)
 {
 	if(!strcmp(uri, LV2_STATE__interface))
 		return &state_iface;
+	else if(!strcmp(uri, LV2_WORKER__interface))
+		return &work_iface;
 	return NULL;
 }
 
