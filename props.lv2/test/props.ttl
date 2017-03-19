@@ -24,6 +24,7 @@
 @prefix state:		<http://lv2plug.in/ns/ext/state#> .
 @prefix patch:		<http://lv2plug.in/ns/ext/patch#> .
 @prefix log:			<http://lv2plug.in/ns/ext/log#> .
+@prefix work:			<http://lv2plug.in/ns/ext/worker#> .
 @prefix units:		<http://lv2plug.in/ns/extensions/units#> .
 @prefix xsd:			<http://www.w3.org/2001/XMLSchema#> .
 
@@ -106,9 +107,9 @@ props:test
 	doap:name "Props Test" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:props ;
-	lv2:extensionData	state:interface ;
-	lv2:requiredFeature urid:map, log:log, state:loadDefaultState ;
+	lv2:requiredFeature urid:map, log:log, state:loadDefaultState, work:schedule ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore ;
+	lv2:extensionData	state:interface, work:interface ;
 
 	lv2:port [
 		# sink event port

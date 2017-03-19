@@ -46,6 +46,7 @@ typedef struct _props_def_t props_def_t;
 typedef struct _props_impl_t props_impl_t;
 typedef struct _props_work_t props_work_t;
 typedef struct _props_t props_t;
+typedef union _props_magic_t props_magic_t;
 
 // function callbacks
 typedef void (*props_event_cb_t)(
@@ -101,7 +102,13 @@ struct _props_impl_t {
 	bool stashing;
 };
 
+union _props_magic_t {
+	uint8_t u64;
+	uint8_t u8 [8];
+};
+
 struct _props_work_t {
+	props_magic_t magic;
 	LV2_URID property;
 	LV2_URID size;
 	LV2_URID type;
@@ -211,6 +218,10 @@ props_work_response(props_t *props, uint32_t size, const void *body);
 /*****************************************************************************
  * API END
  *****************************************************************************/
+
+static const props_magic_t props_magic = {
+	.u8 = {'p', 'r', 'o', 'p', 's', 'l', 'v', '2'}
+};
 
 static inline void
 _impl_spin_lock(props_impl_t *impl)
@@ -889,6 +900,7 @@ _props_schedule(const LV2_Worker_Schedule *work_sched, LV2_URID property,
 	props_work_t *job = malloc(sz);
 	if(job)
 	{
+		job->magic = props_magic;
 		job->property = property;
 		job->type = type;
 		job->size = size;
@@ -980,14 +992,25 @@ static inline LV2_Worker_Status
 props_work(props_t *props, LV2_Worker_Respond_Function respond,
 LV2_Worker_Respond_Handle worker, uint32_t size, const void *body)
 {
-	return respond(worker, size, body);
+	const props_work_t *job = body;
+
+	if(job && (job->magic.u64 == props_magic.u64) )
+	{
+		const LV2_Worker_Status stat = respond(worker, size, body);
+		(void)stat;
+
+		return LV2_WORKER_SUCCESS;
+	}
+
+	return LV2_WORKER_ERR_UNKNOWN;
 }
 
 static inline LV2_Worker_Status
 props_work_response(props_t *props, uint32_t size, const void *body)
 {
 	const props_work_t *job = body;
-	if(job)
+
+	if(job && (job->magic.u64 == props_magic.u64) )
 	{
 		props_impl_t *impl = _props_impl_search(props, job->property);
 		if(impl)
@@ -998,9 +1021,11 @@ props_work_response(props_t *props, uint32_t size, const void *body)
 			if(def->event_cb && (def->event_mask & PROP_EVENT_RESTORE) )
 				def->event_cb(props->data, NULL, 0, PROP_EVENT_RESTORE, impl);
 		}
+
+		return LV2_WORKER_SUCCESS;
 	}
 
-	return LV2_WORKER_SUCCESS;
+	return LV2_WORKER_ERR_UNKNOWN;
 }
 
 #ifdef __cplusplus

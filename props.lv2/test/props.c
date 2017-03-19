@@ -20,6 +20,7 @@
 #include <props.h>
 
 #include <lv2/lv2plug.in/ns/ext/log/log.h>
+#include <lv2/lv2plug.in/ns/ext/log/logger.h>
 
 #define PROPS_PREFIX		"http://open-music-kontrollers.ch/lv2/props#"
 #define PROPS_TEST_URI	PROPS_PREFIX"test"
@@ -43,11 +44,9 @@ struct _plugstate_t {
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_Log_Log *log;
+	LV2_Log_Logger logger;
 	LV2_Atom_Forge forge;
 	LV2_Atom_Forge_Ref ref;
-
-	LV2_URID log_trace;
-	LV2_URID log_note;
 
 	PROPS_T(props, MAX_NPROPS);
 	plugstate_t state;
@@ -62,26 +61,6 @@ struct _plughandle_t {
 	LV2_Atom_Sequence *event_out;
 };
 
-static int
-_log_vprintf(plughandle_t *handle, LV2_URID type, const char *fmt, va_list args)
-{
-	return handle->log->vprintf(handle->log->handle, type, fmt, args);
-}
-
-// non-rt || rt with LV2_LOG__Trace
-static int
-_log_printf(plughandle_t *handle, LV2_URID type, const char *fmt, ...)
-{
-  va_list args;
-	int ret;
-
-  va_start (args, fmt);
-	ret = _log_vprintf(handle, type, fmt, args);
-  va_end(args);
-
-	return ret;
-}
-
 static void
 _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	props_event_t event, props_impl_t *impl)
@@ -92,27 +71,27 @@ _intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
 	{
 		case PROP_EVENT_GET:
 		{
-			_log_printf(handle, handle->log_trace, "GET     : %s", impl->def->property);
+			lv2_log_trace(&handle->logger, "GET     : %s\n", impl->def->property);
 			break;
 		}
 		case PROP_EVENT_SET:
 		{
-			_log_printf(handle, handle->log_trace, "SET     : %s", impl->def->property);
+			lv2_log_trace(&handle->logger, "SET     : %s\n", impl->def->property);
 			break;
 		}
 		case PROP_EVENT_REGISTER:
 		{
-			_log_printf(handle, handle->log_trace, "REGISTER: %s", impl->def->property);
+			lv2_log_note(&handle->logger,  "REGISTER: %s\n", impl->def->property);
 			break;
 		}
 		case PROP_EVENT_SAVE:
 		{
-			_log_printf(handle, handle->log_note, "SAVE    : %s", impl->def->property);
+			lv2_log_note(&handle->logger,  "SAVE    : %s\n", impl->def->property);
 			break;
 		}
 		case PROP_EVENT_RESTORE:
 		{
-			_log_printf(handle, handle->log_note, "RESTORE : %s", impl->def->property);
+			lv2_log_note(&handle->logger,  "RESTORE : %s\n", impl->def->property);
 			break;
 		}
 	}
@@ -259,20 +238,19 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->log_trace = handle->map->map(handle->map->handle, LV2_LOG__Trace);
-	handle->log_note = handle->map->map(handle->map->handle, LV2_LOG__Note);
-
+	lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	lv2_atom_forge_init(&handle->forge, handle->map);
+
 	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
 	{
-		fprintf(stderr, "failed to initialize property structure\n");
+		lv2_log_error(&handle->logger, "failed to initialize property structure\n");
 		free(handle);
 		return NULL;
 	}
 
 	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
 	{
-		_log_printf(handle, handle->log_trace, "ERR     : registering");
+		lv2_log_error(&handle->logger, "ERR     : registering\n");
 		free(handle);
 		return NULL;
 	}
@@ -374,7 +352,7 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 	return props_work_response(&handle->props, size, body);
 }
 
-LV2_Worker_Interface work_iface = {
+static const LV2_Worker_Interface work_iface = {
 	.work = _work,
 	.work_response = _work_response,
 	.end_run = NULL
