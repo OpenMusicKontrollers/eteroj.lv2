@@ -164,6 +164,9 @@ _work(LV2_Handle instance,
 {
 	plughandle_t *handle = instance;
 
+	if(props_work(&handle->props, respond, worker, size, body) == LV2_WORKER_SUCCESS)
+		return LV2_WORKER_SUCCESS;
+
 	if(handle->reconnection_requested)
 	{
 		handle->data.stream = osc_stream_new(&handle->loop, handle->worker_url,
@@ -196,10 +199,6 @@ _work(LV2_Handle instance,
 		else
 			handle->reconnection_requested = true;
 	}
-	else
-	{
-		props_work(&handle->props, respond, worker, size, body); //FIXME
-	}
 
 	uv_run(&handle->loop, UV_RUN_NOWAIT);
 
@@ -212,7 +211,7 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	return props_work_response(&handle->props, size, body); //FIXME
+	return props_work_response(&handle->props, size, body);
 }
 
 static const LV2_Worker_Interface work_iface = {

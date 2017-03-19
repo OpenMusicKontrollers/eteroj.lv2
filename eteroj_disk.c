@@ -572,6 +572,9 @@ _work(LV2_Handle instance,
 {
 	plughandle_t *handle = instance;
 
+	if(props_work(&handle->props, respond, worker, size, body) == LV2_WORKER_SUCCESS)
+		return LV2_WORKER_SUCCESS;
+
 	const job_t *job = body;
 	switch(job->type)
 	{
@@ -746,7 +749,6 @@ _work(LV2_Handle instance,
 
 		default:
 		{
-			//props_work(&handle->props, respond, worker, size, body); //FIXME
 			break;
 		}
 	}
@@ -760,7 +762,7 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	return props_work_response(&handle->props, size, body); //FIXME
+	return props_work_response(&handle->props, size, body);
 }
 
 static const LV2_Worker_Interface work_iface = {
