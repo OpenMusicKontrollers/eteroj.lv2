@@ -203,9 +203,9 @@ eteroj:query
 	doap:name "Eteroj Query" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState ;
+	lv2:requiredFeature urid:map, urid:unmap, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
-	lv2:extensionData state:interface, work:interface ;
+	lv2:extensionData state:interface ;
 
 	lv2:port [
 		# sink event port
@@ -300,9 +300,9 @@ eteroj:pack
 	doap:name "Eteroj (Un)Pack" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState ;
+	lv2:requiredFeature urid:map, urid:unmap, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
-	lv2:extensionData state:interface, work:interface ;
+	lv2:extensionData state:interface ;
 
 	# input event port
 	lv2:port [
@@ -350,8 +350,7 @@ eteroj:ninja
 	doap:name "Eteroj Ninja" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:extensionData work:interface ;
-	lv2:requiredFeature urid:map, urid:unmap, work:schedule ;
+	lv2:requiredFeature urid:map, urid:unmap ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
 
 	# input event port
@@ -580,9 +579,9 @@ eteroj:control
 	doap:name "Eteroj Control" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, work:schedule, state:loadDefaultState ;
+	lv2:requiredFeature urid:map, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
-	lv2:extensionData state:interface, work:interface ;
+	lv2:extensionData state:interface ;
 
 	lv2:port [
 		# atom_in

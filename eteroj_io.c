@@ -164,9 +164,6 @@ _work(LV2_Handle instance,
 {
 	plughandle_t *handle = instance;
 
-	if(props_work(&handle->props, respond, worker, size, body) == LV2_WORKER_SUCCESS)
-		return LV2_WORKER_SUCCESS;
-
 	if(handle->reconnection_requested)
 	{
 		handle->data.stream = osc_stream_new(&handle->loop, handle->worker_url,
@@ -211,7 +208,7 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	return props_work_response(&handle->props, size, body);
+	return LV2_WORKER_SUCCESS;
 }
 
 static const LV2_Worker_Interface work_iface = {
@@ -274,8 +271,7 @@ static void
 _url_change(plughandle_t *handle, const char *url);
 
 static void
-_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
+_intercept(void *data, int64_t frames, props_impl_t *impl)
 {
 	plughandle_t *handle = data;
 
@@ -288,7 +284,6 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.offset = offsetof(plugstate_t, osc_url),
 		.type = LV2_ATOM__String,
 		.max_size = 512,
-		.event_mask = PROP_EVENT_WRITE,
 		.event_cb = _intercept
 	},
 	{
@@ -370,13 +365,9 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->state.osc_status = STATE_IDLE;
 	strncpy(handle->state.osc_error, "", 512);
 
-	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
-	{
-		free(handle);
-		return NULL;
-	}
-
-	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
+	if(!props_init(&handle->props, descriptor->URI,
+		defs, MAX_NPROPS, &handle->state, &handle->stash,
+		handle->map, handle))
 	{
 		free(handle);
 		return NULL;
@@ -550,6 +541,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 	capacity = handle->osc_out->atom.size;
 	lv2_atom_forge_set_buffer(forge, (uint8_t *)handle->osc_out, capacity);
 	handle->ref = lv2_atom_forge_sequence_head(forge, &frame, 0);
+
+	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
 
 	// write outgoing data
 	LV2_ATOM_SEQUENCE_FOREACH(handle->osc_in, ev)
