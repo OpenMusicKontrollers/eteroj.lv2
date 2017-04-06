@@ -62,92 +62,50 @@ struct _plughandle_t {
 };
 
 static void
-_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
+_intercept(void *data, int64_t frames, props_impl_t *impl)
 {
 	plughandle_t *handle = data;
 
-	switch(event)
-	{
-		case PROP_EVENT_GET:
-		{
-			lv2_log_trace(&handle->logger, "GET     : %s\n", impl->def->property);
-			break;
-		}
-		case PROP_EVENT_SET:
-		{
-			lv2_log_trace(&handle->logger, "SET     : %s\n", impl->def->property);
-			break;
-		}
-		case PROP_EVENT_REGISTER:
-		{
-			lv2_log_note(&handle->logger,  "REGISTER: %s\n", impl->def->property);
-			break;
-		}
-		case PROP_EVENT_SAVE:
-		{
-			lv2_log_note(&handle->logger,  "SAVE    : %s\n", impl->def->property);
-			break;
-		}
-		case PROP_EVENT_RESTORE:
-		{
-			lv2_log_note(&handle->logger,  "RESTORE : %s\n", impl->def->property);
-			break;
-		}
-	}
+	lv2_log_trace(&handle->logger, "SET     : %s\n", impl->def->property);
 }
 
 static void
-_intercept_stat1(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
+_intercept_stat1(void *data, int64_t frames, props_impl_t *impl)
 {
 	plughandle_t *handle = data;
 
-	_intercept(data, forge, frames, event, impl);
+	_intercept(data, frames, impl);
 
-	if(event & PROP_EVENT_WRITE)
-	{
-		handle->state.val2 = handle->state.val1 * 2;
+	handle->state.val2 = handle->state.val1 * 2;
 
-		if(forge)
-			props_set(&handle->props, forge, frames, handle->urid.val2, &handle->ref);
-	}
+	props_set(&handle->props, &handle->forge, frames, handle->urid.val2, &handle->ref);
 }
 
 static void
-_intercept_stat3(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
+_intercept_stat3(void *data, int64_t frames, props_impl_t *impl)
 {
 	plughandle_t *handle = data;
 
-	_intercept(data, forge, frames, event, impl);
+	_intercept(data, frames, impl);
 
-	if(event & PROP_EVENT_WRITE)
-	{
-		handle->state.val4 = handle->state.val3 * 2;
+	handle->state.val4 = handle->state.val3 * 2;
 
-		if(forge)
-			props_set(&handle->props, forge, frames, handle->urid.val4, &handle->ref);
-	}
+	props_set(&handle->props, &handle->forge, frames, handle->urid.val4, &handle->ref);
 }
 
 static void
-_intercept_stat6(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
+_intercept_stat6(void *data, int64_t frames, props_impl_t *impl)
 {
 	plughandle_t *handle = data;
 
-	_intercept(data, forge, frames, event, impl);
+	_intercept(data, frames, impl);
 
-	if(event & PROP_EVENT_WRITE)
-	{
-		const char *path = strstr(handle->state.val6, "file://")
-			? handle->state.val6 + 7 // skip "file://"
-			: handle->state.val6;
-		FILE *f = fopen(path, "wb"); // create empty file
-		if(f)
-			fclose(f);
-	}
+	const char *path = strstr(handle->state.val6, "file://")
+		? handle->state.val6 + 7 // skip "file://"
+		: handle->state.val6;
+	FILE *f = fopen(path, "wb"); // create empty file
+	if(f)
+		fclose(f);
 }
 
 static const props_def_t defs [MAX_NPROPS] = {
@@ -155,7 +113,6 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.property = PROPS_PREFIX"statInt",
 		.offset = offsetof(plugstate_t, val1),
 		.type = LV2_ATOM__Int,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept_stat1,
 	},
 	{
@@ -163,14 +120,12 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.access = LV2_PATCH__readable,
 		.offset = offsetof(plugstate_t, val2),
 		.type = LV2_ATOM__Long,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept,
 	},
 	{
 		.property = PROPS_PREFIX"statFloat",
 		.offset = offsetof(plugstate_t, val3),
 		.type = LV2_ATOM__Float,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept_stat3,
 	},
 	{	
@@ -178,14 +133,12 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.access = LV2_PATCH__readable,
 		.offset = offsetof(plugstate_t, val4),
 		.type = LV2_ATOM__Double,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept,
 	},
 	{
 		.property = PROPS_PREFIX"statString",
 		.offset = offsetof(plugstate_t, val5),
 		.type = LV2_ATOM__String,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept,
 		.max_size = MAX_STRLEN // strlen
 	},
@@ -193,7 +146,6 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.property = PROPS_PREFIX"statPath",
 		.offset = offsetof(plugstate_t, val6),
 		.type = LV2_ATOM__Path,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept_stat6,
 		.max_size = MAX_STRLEN // strlen
 	},
@@ -201,7 +153,6 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.property = PROPS_PREFIX"statChunk",
 		.offset = offsetof(plugstate_t, val7),
 		.type = LV2_ATOM__Chunk,
-		.event_mask = PROP_EVENT_ALL,
 		.event_cb = _intercept,
 		.max_size = MAX_STRLEN // strlen
 	}
@@ -241,16 +192,11 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
-	if(!props_init(&handle->props, MAX_NPROPS, descriptor->URI, handle->map, handle))
+	if(!props_init(&handle->props, descriptor->URI,
+		defs, MAX_NPROPS, &handle->state, &handle->stash,
+		handle->map, handle))
 	{
 		lv2_log_error(&handle->logger, "failed to initialize property structure\n");
-		free(handle);
-		return NULL;
-	}
-
-	if(!props_register(&handle->props, defs, MAX_NPROPS, &handle->state, &handle->stash))
-	{
-		lv2_log_error(&handle->logger, "ERR     : registering\n");
 		free(handle);
 		return NULL;
 	}
@@ -289,13 +235,16 @@ run(LV2_Handle instance, uint32_t nsamples)
 	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
 	handle->ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
 
+	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
+
 	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
 		if(handle->ref)
-			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref); //TODO handle return
+			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref);
 	}
+
 	if(handle->ref)
 		lv2_atom_forge_pop(&handle->forge, &frame);
 	else
@@ -335,36 +284,11 @@ LV2_State_Interface state_iface = {
 	.restore = _state_restore
 };
 
-static inline LV2_Worker_Status
-_work(LV2_Handle instance, LV2_Worker_Respond_Function respond,
-LV2_Worker_Respond_Handle worker, uint32_t size, const void *body)
-{
-	plughandle_t *handle = instance;
-
-	return props_work(&handle->props, respond, worker, size, body);
-}
-
-static inline LV2_Worker_Status
-_work_response(LV2_Handle instance, uint32_t size, const void *body)
-{
-	plughandle_t *handle = instance;
-
-	return props_work_response(&handle->props, size, body);
-}
-
-static const LV2_Worker_Interface work_iface = {
-	.work = _work,
-	.work_response = _work_response,
-	.end_run = NULL
-};
-
 static const void *
 extension_data(const char *uri)
 {
 	if(!strcmp(uri, LV2_STATE__interface))
 		return &state_iface;
-	else if(!strcmp(uri, LV2_WORKER__interface))
-		return &work_iface;
 	return NULL;
 }
 
