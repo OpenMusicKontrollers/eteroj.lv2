@@ -973,5 +973,5 @@ const LV2_Descriptor eteroj_query = {
 	.run						= run,
 	.deactivate			= NULL,
 	.cleanup				= cleanup,
-	.extension_data	= NULL
+	.extension_data	= extension_data
 };

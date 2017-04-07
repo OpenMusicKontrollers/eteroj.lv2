@@ -350,8 +350,9 @@ eteroj:ninja
 	doap:name "Eteroj Ninja" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap ;
+	lv2:requiredFeature urid:map, urid:unmap, work:schedule ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+	lv2:extensionData work:interface ;
 
 	# input event port
 	lv2:port [
