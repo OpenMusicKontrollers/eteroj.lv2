@@ -92,9 +92,9 @@ struct _plughandle_t {
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
 
+	uv_thread_t thread;
 	uv_loop_t loop;
-
-	LV2_Worker_Schedule *sched;
+	atomic_bool done;
 
 	LV2_OSC_Schedule *osc_sched;
 	list_t *list;
@@ -106,6 +106,7 @@ struct _plughandle_t {
 		osc_stream_t *stream;
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
+		varchunk_t *to_thread;
 	} data;
 };
 
@@ -163,69 +164,6 @@ static const LV2_State_Interface state_iface = {
 	.restore = _state_restore
 };
 
-// non-rt thread
-static LV2_Worker_Status
-_work(LV2_Handle instance,
-	LV2_Worker_Respond_Function respond,
-	LV2_Worker_Respond_Handle worker,
-	uint32_t size,
-	const void *body)
-{
-	plughandle_t *handle = instance;
-
-	if(handle->reconnection_requested)
-	{
-		handle->data.stream = osc_stream_new(&handle->loop, handle->worker_url,
-			&handle->data.driver, handle);
-
-		handle->reconnection_requested = false;
-	}
-
-	LV2_OSC_Reader reader;
-	LV2_OSC_Arg arg;
-	lv2_osc_reader_initialize(&reader, body, size);
-	lv2_osc_reader_arg_begin(&reader, &arg, size);
-
-	if(!strcmp(arg.path, "/eteroj/flush"))
-	{
-		osc_stream_flush(handle->data.stream);
-	}
-	else if(!strcmp(arg.path, "/eteroj/recv"))
-	{
-		// nothing
-	}
-	else if(!strcmp(arg.path, "/eteroj/url"))
-	{
-		const char *osc_url = arg.s;
-
-		strcpy(handle->worker_url, osc_url);
-
-		if(handle->data.stream)
-			osc_stream_free(handle->data.stream);
-		else
-			handle->reconnection_requested = true;
-	}
-
-	uv_run(&handle->loop, UV_RUN_NOWAIT);
-
-	return LV2_WORKER_SUCCESS;
-}
-
-// rt-thread
-static LV2_Worker_Status
-_work_response(LV2_Handle instance, uint32_t size, const void *body)
-{
-	plughandle_t *handle = instance;
-
-	return LV2_WORKER_SUCCESS;
-}
-
-static const LV2_Worker_Interface work_iface = {
-	.work = _work,
-	.work_response = _work_response,
-	.end_run = NULL
-};
-
 // non-rt
 static void *
 _data_recv_req(size_t size, void *data)
@@ -272,12 +210,31 @@ _data_free(void *data)
 {
 	plughandle_t *handle = data;
 
-	handle->data.stream = NULL;
+	//handle->data.stream = NULL;
 	handle->reconnection_requested = true;
 }
 
+// rt
 static void
-_url_change(plughandle_t *handle, const char *url);
+_url_change(plughandle_t *handle, const char *url)
+{
+	LV2_OSC_Writer writer;
+	uint8_t buf [STR_LEN];
+	lv2_osc_writer_initialize(&writer, buf, STR_LEN);
+	lv2_osc_writer_message_vararg(&writer, "/eteroj/url", "s", url);
+	size_t size;
+	lv2_osc_writer_finalize(&writer, &size);
+
+	if(size)
+	{
+		uint8_t *dst;
+		if((dst = varchunk_write_request(handle->data.to_thread, size))) //FIXME use request_max
+		{
+			memcpy(dst, buf, size);
+			varchunk_write_advance(handle->data.to_thread, size);
+		}
+	}
+}
 
 static void
 _intercept(void *data, int64_t frames, props_impl_t *impl)
@@ -350,8 +307,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 			handle->unmap = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_LOG__log))
 			handle->log = features[i]->data;
-		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
-			handle->sched = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_OSC__schedule))
 			handle->osc_sched = features[i]->data;
 	}
@@ -360,13 +315,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	{
 		fprintf(stderr,
 			"%s: Host does not support urid:(un)map\n", descriptor->URI);
-		free(handle);
-		return NULL;
-	}
-	if(!handle->sched)
-	{
-		fprintf(stderr,	
-			"%s: Host does not support worker:sched\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
@@ -381,7 +329,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	// init data
 	handle->data.from_worker = varchunk_new(BUF_SIZE, true);
 	handle->data.to_worker = varchunk_new(BUF_SIZE, true);
-	if(!handle->data.from_worker || !handle->data.to_worker)
+	handle->data.to_thread = varchunk_new(BUF_SIZE, true);
+	if(!handle->data.from_worker || !handle->data.to_worker || !handle->data.to_thread)
 	{
 		free(handle);
 		return NULL;
@@ -407,8 +356,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	_set_status(handle, STATUS_IDLE);
 	_set_error(handle, "");
 
-	uv_loop_init(&handle->loop);
-
 	return handle;
 }
 
@@ -431,31 +378,96 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 }
 
 static void
-activate(LV2_Handle instance)
+_thread(void *data)
 {
-	// nothing
+	plughandle_t *handle = data;
+
+	uv_loop_init(&handle->loop);
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+	pthread_t self = pthread_self();
+
+	struct sched_param schedp;
+	memset(&schedp, 0, sizeof(struct sched_param));
+	schedp.sched_priority = 60; //FIXME make this configurable
+	
+	if(schedp.sched_priority)
+	{
+		if(pthread_setschedparam(self, SCHED_RR, &schedp))
+			fprintf(stderr, "pthread_setschedparam error\n");
+	}
+#endif
+
+	while(!atomic_load_explicit(&handle->done, memory_order_relaxed))
+	{
+		usleep(1000); //FIXME solve this differently
+
+		if(handle->reconnection_requested)
+		{
+			handle->data.stream = osc_stream_new(&handle->loop, handle->worker_url,
+				&handle->data.driver, handle);
+
+			handle->reconnection_requested = false;
+		}
+
+		size_t size;
+		const uint8_t *body;
+		while((body = varchunk_read_request(handle->data.to_thread, &size)))
+		{
+			LV2_OSC_Reader reader;
+			LV2_OSC_Arg arg;
+			lv2_osc_reader_initialize(&reader, body, size);
+			lv2_osc_reader_arg_begin(&reader, &arg, size);
+
+			if(!strcmp(arg.path, "/eteroj/flush"))
+			{
+				osc_stream_flush(handle->data.stream);
+			}
+			else if(!strcmp(arg.path, "/eteroj/recv"))
+			{
+				// nothing
+			}
+			else if(!strcmp(arg.path, "/eteroj/url"))
+			{
+				const char *osc_url = arg.s;
+
+				strcpy(handle->worker_url, osc_url);
+
+				if(handle->data.stream)
+				{
+					osc_stream_free(handle->data.stream);
+					handle->data.stream = NULL;
+				}
+				else
+				{
+					handle->reconnection_requested = true;
+				}
+			}
+
+			varchunk_read_advance(handle->data.to_thread);
+		}
+
+		uv_run(&handle->loop, UV_RUN_NOWAIT);
+	}
+
+	if(handle->data.stream)
+	{
+		osc_stream_free(handle->data.stream);
+		handle->data.stream = NULL;
+	}
+
+	uv_run(&handle->loop, UV_RUN_NOWAIT);
+
+	uv_loop_close(&handle->loop);
 }
 
-static const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
-static const char recv_msg [] = "/eteroj/recv\0\0\0\0,\0\0\0";
-
-// rt
 static void
-_url_change(plughandle_t *handle, const char *url)
+activate(LV2_Handle instance)
 {
-	LV2_OSC_Writer writer;
-	uint8_t buf [STR_LEN];
-	lv2_osc_writer_initialize(&writer, buf, STR_LEN);
-	lv2_osc_writer_message_vararg(&writer, "/eteroj/url", "s", url);
-	size_t size;
-	lv2_osc_writer_finalize(&writer, &size);
+	plughandle_t *handle = instance;
 
-	if(size)
-	{
-		LV2_Worker_Status stat = handle->sched->schedule_work(
-			handle->sched->handle, size, buf);
-		//TODO check status
-	}
+	atomic_init(&handle->done, false);
+	uv_thread_create(&handle->thread, _thread, handle);
 }
 
 static inline void
@@ -560,6 +572,9 @@ _unroll(plughandle_t *handle, const uint8_t *buf, size_t size)
 	}
 }
 
+static const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
+static const char recv_msg [] = "/eteroj/recv\0\0\0\0,\0\0\0";
+
 static void
 run(LV2_Handle instance, uint32_t nsamples)
 {
@@ -611,15 +626,21 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	if(handle->needs_flushing)
 	{
-		LV2_Worker_Status stat = handle->sched->schedule_work(
-			handle->sched->handle, sizeof(flush_msg), flush_msg);
-		//TODO check status
+		uint8_t *dst;
+		if((dst = varchunk_write_request(handle->data.to_thread, sizeof(flush_msg))))
+		{
+			memcpy(dst, flush_msg, sizeof(flush_msg));
+			varchunk_write_advance(handle->data.to_thread, sizeof(flush_msg));
+		}
 	}
 	else
 	{
-		LV2_Worker_Status stat = handle->sched->schedule_work(
-			handle->sched->handle, sizeof(recv_msg), recv_msg);
-		//TODO check status
+		uint8_t *dst;
+		if((dst = varchunk_write_request(handle->data.to_thread, sizeof(recv_msg))))
+		{
+			memcpy(dst, recv_msg, sizeof(recv_msg));
+			varchunk_write_advance(handle->data.to_thread, sizeof(recv_msg));
+		}
 	}
 
 	// reschedule scheduled bundles
@@ -688,10 +709,8 @@ deactivate(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	if(handle->data.stream)
-		osc_stream_free(handle->data.stream);
-
-	uv_run(&handle->loop, UV_RUN_NOWAIT);
+	atomic_store_explicit(&handle->done, true, memory_order_relaxed);
+	uv_thread_join(&handle->thread);
 }
 
 static void
@@ -699,11 +718,10 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	uv_loop_close(&handle->loop);
-
 	tlsf_destroy(handle->tlsf);
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
+	varchunk_free(handle->data.to_thread);
 
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
@@ -714,8 +732,6 @@ extension_data(const char* uri)
 {
 	if(!strcmp(uri, LV2_STATE__interface))
 		return &state_iface;
-	else if(!strcmp(uri, LV2_WORKER__interface))
-		return &work_iface;
 
 	return NULL;
 }
