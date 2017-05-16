@@ -33,6 +33,7 @@
 #define POOL_SIZE 0x20000 // 128KB
 #define BUF_SIZE 0x10000
 #define MAX_NPROPS 3
+#define STR_LEN 512
 
 typedef enum _plugenum_t plugenum_t;
 typedef struct _plugstate_t plugstate_t;
@@ -40,11 +41,11 @@ typedef struct _list_t list_t;
 typedef struct _plughandle_t plughandle_t;
 
 enum _plugenum_t {
-	STATE_IDLE					= 0,
-	STATE_READY					= 1,
-	STATE_TIMEDOUT			= 2,
-	STATE_ERRORED				= 3,
-	STATE_CONNECTED			= 4
+	STATUS_IDLE					= 0,
+	STATUS_READY				= 1,
+	STATUS_TIMEDOUT			= 2,
+	STATUS_ERRORED			= 3,
+	STATUS_CONNECTED		= 4
 };
 
 struct _list_t {
@@ -56,9 +57,9 @@ struct _list_t {
 };
 
 struct _plugstate_t {
-	char osc_url [512];
-	int32_t osc_status;
-	char osc_error [512];
+	char osc_url [STR_LEN];
+	char osc_status [STR_LEN];
+	char osc_error [STR_LEN];
 };
 
 struct _plughandle_t {
@@ -80,7 +81,7 @@ struct _plughandle_t {
 	volatile bool needs_flushing;
 	volatile bool status_updated;
 	volatile bool reconnection_requested;
-	char worker_url [512];
+	char worker_url [STR_LEN];
 
 	plugstate_t state;
 	plugstate_t stash;
@@ -106,6 +107,14 @@ struct _plughandle_t {
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
 	} data;
+};
+
+static const char *status [] = {
+	[STATUS_IDLE] = "idle",
+	[STATUS_READY] = "ready",
+	[STATUS_TIMEDOUT] = "timedout",
+	[STATUS_ERRORED] = "errored",
+	[STATUS_CONNECTED] = "connected"
 };
 
 static inline list_t *
@@ -283,23 +292,45 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.property = ETEROJ_URL_URI,
 		.offset = offsetof(plugstate_t, osc_url),
 		.type = LV2_ATOM__String,
-		.max_size = 512,
+		.max_size = STR_LEN,
 		.event_cb = _intercept
 	},
 	{
 		.property = ETEROJ_STAT_URI,
 		.offset = offsetof(plugstate_t, osc_status),
 		.access = LV2_PATCH__readable,
-		.type = LV2_ATOM__Int,
+		.type = LV2_ATOM__String,
+		.max_size = STR_LEN
 	},
 	{
 		.property = ETEROJ_ERR_URI,
 		.offset = offsetof(plugstate_t, osc_error),
 		.access = LV2_PATCH__readable,
 		.type = LV2_ATOM__String,
-		.max_size = 512,
+		.max_size = STR_LEN,
 	}
 };
+
+static inline void
+_set_status(plughandle_t *handle, int stat)
+{
+	props_impl_t *impl = _props_bsearch(&handle->props, handle->uris.eteroj_stat);
+	if(impl)
+	{
+		const char *str = status[stat];
+		_props_impl_set(&handle->props, impl, handle->forge.String, strlen(str) + 1, str);
+	}
+}
+
+static inline void
+_set_error(plughandle_t *handle, const char *err)
+{
+	props_impl_t *impl = _props_bsearch(&handle->props, handle->uris.eteroj_err);
+	if(impl)
+	{
+		_props_impl_set(&handle->props, impl, handle->forge.String, strlen(err) + 1, err);
+	}
+}
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
@@ -362,9 +393,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.send_adv = _data_send_adv;
 	handle->data.driver.free = _data_free;
 
-	handle->state.osc_status = STATE_IDLE;
-	strncpy(handle->state.osc_error, "", 512);
-
 	if(!props_init(&handle->props, descriptor->URI,
 		defs, MAX_NPROPS, &handle->state, &handle->stash,
 		handle->map, handle))
@@ -375,6 +403,9 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	handle->uris.eteroj_stat = props_map(&handle->props, ETEROJ_STAT_URI);
 	handle->uris.eteroj_err = props_map(&handle->props, ETEROJ_ERR_URI);
+
+	_set_status(handle, STATUS_IDLE);
+	_set_error(handle, "");
 
 	uv_loop_init(&handle->loop);
 
@@ -413,15 +444,15 @@ static void
 _url_change(plughandle_t *handle, const char *url)
 {
 	LV2_OSC_Writer writer;
-	uint8_t buf [512];
-	lv2_osc_writer_initialize(&writer, buf, 512);
+	uint8_t buf [STR_LEN];
+	lv2_osc_writer_initialize(&writer, buf, STR_LEN);
 	lv2_osc_writer_message_vararg(&writer, "/eteroj/url", "s", url);
 	size_t size;
 	lv2_osc_writer_finalize(&writer, &size);
 
 	if(size)
 	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
+		LV2_Worker_Status stat = handle->sched->schedule_work(
 			handle->sched->handle, size, buf);
 		//TODO check status
 	}
@@ -437,16 +468,16 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 
 	if(!strcmp(arg.path, "/stream/resolve"))
 	{
-		handle->state.osc_status = STATE_READY;
-		snprintf(handle->state.osc_error, 512, "");
+		_set_status(handle, STATUS_READY);
+		_set_error(handle, "");
 
 		handle->needs_flushing = true;
 		handle->status_updated = true;
 	}
 	else if(!strcmp(arg.path, "/stream/timeout"))
 	{
-		handle->state.osc_status = STATE_TIMEDOUT;
-		snprintf(handle->state.osc_error, 512, "");
+		_set_status(handle, STATUS_TIMEDOUT);
+		_set_error(handle, "");
 
 		handle->status_updated = true;
 	}
@@ -455,23 +486,25 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 		const char *where = arg.s;
 		const char *what = lv2_osc_reader_arg_next(&reader, &arg)->s;
 
-		handle->state.osc_status = STATE_ERRORED;
-		snprintf(handle->state.osc_error, 512, "%s (%s)\n", where, what);
+		char err [STR_LEN];
+		snprintf(err, STR_LEN, "%s (%s)\n", where, what);
+		_set_status(handle, STATUS_ERRORED);
+		_set_error(handle, err);
 
 		handle->status_updated = true;
 	}
 	else if(!strcmp(arg.path, "/stream/connect"))
 	{
-		handle->state.osc_status = STATE_CONNECTED;
-		snprintf(handle->state.osc_error, 512, "");
+		_set_status(handle, STATUS_CONNECTED);
+		_set_error(handle, "");
 
 		handle->needs_flushing = true;
 		handle->status_updated = true;
 	}
 	else if(!strcmp(arg.path, "/stream/disconnect"))
 	{
-		handle->state.osc_status = STATE_READY;
-		snprintf(handle->state.osc_error, 512, "");
+		_set_status(handle, STATUS_READY);
+		_set_error(handle, "");
 
 		handle->status_updated = true;
 	}
@@ -565,25 +598,26 @@ run(LV2_Handle instance, uint32_t nsamples)
 					lv2_osc_writer_finalize(&writer, &written);
 
 					if(written)
+					{
 						varchunk_write_advance(handle->data.to_worker, written);
+						handle->needs_flushing = true;
+					}
 				}
 				else if(handle->log)
 					lv2_log_trace(&handle->logger, "output ringbuffer overflow");
 			}
 		}
 	}
-	if(handle->osc_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
-		handle->needs_flushing = true;
 
 	if(handle->needs_flushing)
 	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
+		LV2_Worker_Status stat = handle->sched->schedule_work(
 			handle->sched->handle, sizeof(flush_msg), flush_msg);
 		//TODO check status
 	}
 	else
 	{
-		LV2_Worker_Status status = handle->sched->schedule_work(
+		LV2_Worker_Status stat = handle->sched->schedule_work(
 			handle->sched->handle, sizeof(recv_msg), recv_msg);
 		//TODO check status
 	}

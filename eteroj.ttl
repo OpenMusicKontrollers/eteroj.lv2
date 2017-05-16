@@ -73,14 +73,7 @@ eteroj:status
 	a lv2:Parameter ;
 	rdfs:label "Status" ;
 	rdfs:comment "will list connection status" ;
-	rdfs:range atom:Int ;
-	lv2:minimum 0 ;
-	lv2:maximum 4 ;
-	lv2:scalePoint [ rdfs:label "Idle" ;			rdf:value 0 ] ;
-	lv2:scalePoint [ rdfs:label "Ready" ;			rdf:value 1 ] ;
-	lv2:scalePoint [ rdfs:label "Timedout" ;	rdf:value 2 ] ;
-	lv2:scalePoint [ rdfs:label "Errored" ;		rdf:value 3 ] ;
-	lv2:scalePoint [ rdfs:label "Connected" ;	rdf:value 4 ] .
+	rdfs:range atom:String .
 
 # IO Plugin
 eteroj:io
