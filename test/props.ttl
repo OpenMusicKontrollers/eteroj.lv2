@@ -24,6 +24,7 @@
 @prefix state:		<http://lv2plug.in/ns/ext/state#> .
 @prefix patch:		<http://lv2plug.in/ns/ext/patch#> .
 @prefix log:			<http://lv2plug.in/ns/ext/log#> .
+@prefix units:		<http://lv2plug.in/ns/extensions/units#> .
 @prefix xsd:			<http://www.w3.org/2001/XMLSchema#> .
 
 @prefix lic:			<http://opensource.org/licenses/> .
@@ -48,6 +49,8 @@ props:statInt
 	a lv2:Parameter ;
 	rdfs:range atom:Int ;
 	rdfs:label "statInt" ;
+	rdfs:comment "This is a 32-bit integer" ;
+	units:unit units:hz ;
 	lv2:minimum 0 ;
 	lv2:maximum 10 .
 
@@ -55,13 +58,17 @@ props:statLong
 	a lv2:Parameter ;
 	rdfs:range atom:Long ;
 	rdfs:label "statLong" ;
+	rdfs:comment "This is a 64-bit integer" ;
+	units:unit units:khz ;
 	lv2:minimum 0 ;
-	lv2:maximum 10 .
+	lv2:maximum 20 .
 
 props:statFloat
 	a lv2:Parameter ;
 	rdfs:range atom:Float ;
 	rdfs:label "statFloat" ;
+	rdfs:comment "This is a 32-bit float" ;
+	units:unit units:mhz ;
 	lv2:minimum -0.5 ;
 	lv2:maximum 0.5 .
 
@@ -69,18 +76,28 @@ props:statDouble
 	a lv2:Parameter ;
 	rdfs:range atom:Double ;
 	rdfs:label "statDouble" ;
+	rdfs:comment "This is a 64-bit double" ;
+	units:unit units:db ;
 	lv2:minimum -1.0 ;
 	lv2:maximum 1.0 .
 
 props:statString
 	a lv2:Parameter ;
 	rdfs:range atom:String ;
-	rdfs:label "statString" .
+	rdfs:label "statString" ;
+	rdfs:comment "This is a string" .
 
 props:statPath
 	a lv2:Parameter ;
 	rdfs:range atom:Path ;
-	rdfs:label "statPath" .
+	rdfs:label "statPath" ;
+	rdfs:comment "This is a path" .
+
+props:statChunk
+	a lv2:Parameter ;
+	rdfs:range atom:Chunk;
+	rdfs:label "statChunk" ;
+	rdfs:comment "This is a chunk" .
 
 # Looper Test
 props:test
@@ -89,9 +106,9 @@ props:test
 	doap:name "Props Test" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:props ;
-	lv2:extensionData	state:interface ;
 	lv2:requiredFeature urid:map, log:log, state:loadDefaultState ;
-	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore ;
+	lv2:extensionData	state:interface ;
 
 	lv2:port [
 		# sink event port
@@ -115,18 +132,21 @@ props:test
 		lv2:designation lv2:control ;
 	] ;
 
-	patch:writable props:statInt ;
-	patch:readable props:statLong ;
-	patch:writable props:statFloat ;
-	patch:readable props:statDouble ;
-	patch:writable props:statString ;
-	patch:writable props:statPath ;
+	patch:writable
+		props:statInt ,
+		props:statFloat ,
+		props:statString ,
+		props:statPath ,
+		props:statChunk ;
+
+	patch:readable
+		props:statLong ,
+		props:statDouble ;
 
 	state:state [
 		props:statInt 4 ;
-		props:statLong "5"^^xsd:long ;
-		props:statFloat 0.4 ;
-		props:statDouble "0.5"^^xsd:double ;
+		props:statFloat "0.4"^^xsd:float ;
 		props:statString "Hello world" ;
-		props:statPath <hello.world> ;
+		props:statPath <props.ttl> ;
+		props:statChunk "AQIDBAUGBw=="^^xsd:base64Binary ;
 	] .

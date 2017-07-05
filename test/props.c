@@ -20,229 +20,143 @@
 #include <props.h>
 
 #include <lv2/lv2plug.in/ns/ext/log/log.h>
+#include <lv2/lv2plug.in/ns/ext/log/logger.h>
 
 #define PROPS_PREFIX		"http://open-music-kontrollers.ch/lv2/props#"
 #define PROPS_TEST_URI	PROPS_PREFIX"test"
 
+#define MAX_NPROPS 7
+#define MAX_STRLEN 256
+
+typedef struct _plugstate_t plugstate_t;
 typedef struct _plughandle_t plughandle_t;
+
+struct _plugstate_t {
+	int32_t val1;
+	int64_t val2;
+	float val3;
+	double val4;
+	char val5 [MAX_STRLEN];
+	char val6 [MAX_STRLEN];
+	uint8_t val7 [MAX_STRLEN];
+};
 
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_Log_Log *log;
+	LV2_Log_Logger logger;
 	LV2_Atom_Forge forge;
+	LV2_Atom_Forge_Ref ref;
 
-	LV2_URID log_trace;
-
-	props_t *props;
-
-	struct {
-		int32_t val1;
-		int64_t val2;
-		float val3;
-		double val4;
-		int32_t val5;
-		int32_t val6;
-		char val7 [256];
-	} dyn;
+	PROPS_T(props, MAX_NPROPS);
+	plugstate_t state;
+	plugstate_t stash;
 
 	struct {
-		int32_t val1;
-		int64_t val2;
-		float val3;
-		double val4;
-		char val5 [256];
-		char val6 [256];
-	} stat;
+		LV2_URID val2;
+		LV2_URID val4;
+	} urid;
 
 	const LV2_Atom_Sequence *event_in;
 	LV2_Atom_Sequence *event_out;
 };
 
-static const props_def_t dyn1 = {
-	.label = "Int",
-	.property = PROPS_PREFIX"Int",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.i = 0,
-	.maximum.i = 10
-};
-
-static const props_def_t dyn2 = {
-	.label = "Long",
-	.property = PROPS_PREFIX"Long",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Long,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.h = 0,
-	.maximum.h = 10
-};
-
-static const props_def_t dyn3 = {
-	.label = "Float",
-	.property = PROPS_PREFIX"Float",
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Float,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.f = -1.f,
-	.maximum.f = 1.f
-};
-
-static const props_def_t dyn4 = {
-	.label = "Double",
-	.property = PROPS_PREFIX"Double",
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Double,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.d = -1.0,
-	.maximum.d = 1.0
-};
-
-static const props_scale_point_t scale_points5 [] = {
-	{.label = "One",		.value.i = 0},
-	{.label = "Two",		.value.i = 1},
-	{.label = "Three",	.value.i = 2},
-	{.label = "Four",		.value.i = 3},
-	{.label = NULL } // sentinel
-};
-
-static const props_def_t dyn5 = {
-	.label = "scaleInt",
-	.property = PROPS_PREFIX"scaleInt",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.i = 0,
-	.maximum.i = 3,
-	.scale_points = scale_points5
-};
-
-static const props_def_t dyn6 = {
-	.label = "Bool",
-	.property = PROPS_PREFIX"Bool",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Bool,
-	.mode = PROP_MODE_DYNAMIC,
-	.minimum.d = 0,
-	.maximum.d = 1
-};
-
-static const props_def_t dyn7 = {
-	.label = "String",
-	.property = PROPS_PREFIX"String",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_DYNAMIC,
-	.maximum.s = 256, // strlen
-};
-
-static const props_def_t stat1 = {
-	.label = "statInt",
-	.property = PROPS_PREFIX"statInt",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Int,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat2 = {
-	.label = "statLong",
-	.property = PROPS_PREFIX"statLong",
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Long,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat3 = {
-	.label = "statFloat",
-	.property = PROPS_PREFIX"statFloat",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Float,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat4 = {
-	.label = "statDouble",
-	.property = PROPS_PREFIX"statDouble",
-	.access = LV2_PATCH__readable,
-	.type = LV2_ATOM__Double,
-	.mode = PROP_MODE_STATIC
-};
-
-static const props_def_t stat5 = {
-	.label = "statString",
-	.property = PROPS_PREFIX"statString",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__String,
-	.mode = PROP_MODE_STATIC,
-	.maximum.s = 256 // strlen
-};
-
-static const props_def_t stat6 = {
-	.label = "statPath",
-	.property = PROPS_PREFIX"statPath",
-	.access = LV2_PATCH__writable,
-	.type = LV2_ATOM__Path,
-	.mode = PROP_MODE_STATIC,
-	.maximum.s = 256 // strlen
-};
-
-const unsigned max_nprops = 32;
-
-static int
-_log_vprintf(plughandle_t *handle, LV2_URID type, const char *fmt, va_list args)
-{
-	return handle->log->vprintf(handle->log->handle, type, fmt, args);
-}
-
-// non-rt || rt with LV2_LOG__Trace
-static int
-_log_printf(plughandle_t *handle, LV2_URID type, const char *fmt, ...)
-{
-  va_list args;
-	int ret;
-
-  va_start (args, fmt);
-	ret = _log_vprintf(handle, type, fmt, args);
-  va_end(args);
-
-	return ret;
-}
-
 static void
-_intercept(void *data, LV2_Atom_Forge *forge, int64_t frames,
-	props_event_t event, props_impl_t *impl)
+_intercept(void *data, int64_t frames, props_impl_t *impl)
 {
 	plughandle_t *handle = data;
 
-	switch(event)
-	{
-		case PROP_EVENT_GET:
-		{
-			_log_printf(handle, handle->log_trace, "GET     : %s", impl->def->label);
-			break;
-		}
-		case PROP_EVENT_SET:
-		{
-			_log_printf(handle, handle->log_trace, "SET     : %s", impl->def->label);
-			break;
-		}
-		case PROP_EVENT_REGISTER:
-		{
-			_log_printf(handle, handle->log_trace, "REGISTER: %s", impl->def->label);
-			break;
-		}
-		case PROP_EVENT_SAVE:
-		{
-			_log_printf(handle, handle->log_trace, "SAVE    : %s", impl->def->label);
-			break;
-		}
-		case PROP_EVENT_RESTORE:
-		{
-			_log_printf(handle, handle->log_trace, "RESTORE : %s", impl->def->label);
-			break;
-		}
-	}
+	lv2_log_trace(&handle->logger, "SET     : %s\n", impl->def->property);
 }
+
+static void
+_intercept_stat1(void *data, int64_t frames, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, frames, impl);
+
+	handle->state.val2 = handle->state.val1 * 2;
+
+	props_set(&handle->props, &handle->forge, frames, handle->urid.val2, &handle->ref);
+}
+
+static void
+_intercept_stat3(void *data, int64_t frames, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, frames, impl);
+
+	handle->state.val4 = handle->state.val3 * 2;
+
+	props_set(&handle->props, &handle->forge, frames, handle->urid.val4, &handle->ref);
+}
+
+static void
+_intercept_stat6(void *data, int64_t frames, props_impl_t *impl)
+{
+	plughandle_t *handle = data;
+
+	_intercept(data, frames, impl);
+
+	const char *path = strstr(handle->state.val6, "file://")
+		? handle->state.val6 + 7 // skip "file://"
+		: handle->state.val6;
+	FILE *f = fopen(path, "wb"); // create empty file
+	if(f)
+		fclose(f);
+}
+
+static const props_def_t defs [MAX_NPROPS] = {
+	{
+		.property = PROPS_PREFIX"statInt",
+		.offset = offsetof(plugstate_t, val1),
+		.type = LV2_ATOM__Int,
+		.event_cb = _intercept_stat1,
+	},
+	{
+		.property = PROPS_PREFIX"statLong",
+		.access = LV2_PATCH__readable,
+		.offset = offsetof(plugstate_t, val2),
+		.type = LV2_ATOM__Long,
+		.event_cb = _intercept,
+	},
+	{
+		.property = PROPS_PREFIX"statFloat",
+		.offset = offsetof(plugstate_t, val3),
+		.type = LV2_ATOM__Float,
+		.event_cb = _intercept_stat3,
+	},
+	{	
+		.property = PROPS_PREFIX"statDouble",
+		.access = LV2_PATCH__readable,
+		.offset = offsetof(plugstate_t, val4),
+		.type = LV2_ATOM__Double,
+		.event_cb = _intercept,
+	},
+	{
+		.property = PROPS_PREFIX"statString",
+		.offset = offsetof(plugstate_t, val5),
+		.type = LV2_ATOM__String,
+		.event_cb = _intercept,
+		.max_size = MAX_STRLEN // strlen
+	},
+	{
+		.property = PROPS_PREFIX"statPath",
+		.offset = offsetof(plugstate_t, val6),
+		.type = LV2_ATOM__Path,
+		.event_cb = _intercept_stat6,
+		.max_size = MAX_STRLEN // strlen
+	},
+	{
+		.property = PROPS_PREFIX"statChunk",
+		.offset = offsetof(plugstate_t, val7),
+		.type = LV2_ATOM__Chunk,
+		.event_cb = _intercept,
+		.max_size = MAX_STRLEN // strlen
+	}
+};
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
@@ -275,41 +189,20 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->log_trace = handle->map->map(handle->map->handle, LV2_LOG__Trace);
-
+	lv2_log_logger_init(&handle->logger, handle->map, handle->log);
 	lv2_atom_forge_init(&handle->forge, handle->map);
-	handle->props = props_new(max_nprops, descriptor->URI, handle->map, handle);
-	if(!handle->props)
+
+	if(!props_init(&handle->props, descriptor->URI,
+		defs, MAX_NPROPS, &handle->state, &handle->stash,
+		handle->map, handle))
 	{
-		fprintf(stderr, "failed to allocate property structure\n");
+		lv2_log_error(&handle->logger, "failed to initialize property structure\n");
 		free(handle);
 		return NULL;
 	}
 
-	handle->dyn.val1 = 2;
-	handle->dyn.val2 = 3;
-	handle->dyn.val3 = 0.2f;
-	handle->dyn.val4 = 0.3;
-	handle->dyn.val5 = 0;
-	handle->dyn.val6 = true;
-	handle->dyn.val7[0] = '\0';
-
-	props_register(handle->props, &dyn1, _intercept, &handle->dyn.val1);
-	props_register(handle->props, &dyn2, _intercept, &handle->dyn.val2);
-	props_register(handle->props, &dyn3, _intercept, &handle->dyn.val3);
-	props_register(handle->props, &dyn4, _intercept, &handle->dyn.val4);
-	props_register(handle->props, &dyn5, _intercept, &handle->dyn.val5);
-	props_register(handle->props, &dyn6, _intercept, &handle->dyn.val6);
-	props_register(handle->props, &dyn7, _intercept, &handle->dyn.val7);
-
-	props_register(handle->props, &stat1, _intercept, &handle->stat.val1);
-	props_register(handle->props, &stat2, _intercept, &handle->stat.val2);
-	props_register(handle->props, &stat3, _intercept, &handle->stat.val3);
-	props_register(handle->props, &stat4, _intercept, &handle->stat.val4);
-	props_register(handle->props, &stat5, _intercept, &handle->stat.val5);
-	props_register(handle->props, &stat6, _intercept, &handle->stat.val6);
-
-	props_sort(handle->props);
+	handle->urid.val2 = props_map(&handle->props, PROPS_PREFIX"statLong");
+	handle->urid.val4 = props_map(&handle->props, PROPS_PREFIX"statDouble");
 
 	return handle;
 }
@@ -340,16 +233,19 @@ run(LV2_Handle instance, uint32_t nsamples)
 	uint32_t capacity = handle->event_out->atom.size;
 	LV2_Atom_Forge_Frame frame;
 	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
-	LV2_Atom_Forge_Ref ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+	handle->ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+
+	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
 
 	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		if(ref)
-			props_advance(handle->props, &handle->forge, ev->time.frames, obj, &ref); //TODO handle return
+		if(handle->ref)
+			props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref);
 	}
-	if(ref)
+
+	if(handle->ref)
 		lv2_atom_forge_pop(&handle->forge, &frame);
 	else
 		lv2_atom_sequence_clear(handle->event_out);
@@ -360,7 +256,6 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	props_free(handle->props);
 	free(handle);
 }
 
@@ -371,7 +266,7 @@ _state_save(LV2_Handle instance, LV2_State_Store_Function store,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_save(handle->props, &handle->forge, store, state, flags, features);
+	return props_save(&handle->props, store, state, flags, features);
 }
 
 static LV2_State_Status
@@ -381,7 +276,7 @@ _state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
 {
 	plughandle_t *handle = (plughandle_t *)instance;
 
-	return props_restore(handle->props, &handle->forge, retrieve, state, flags, features);
+	return props_restore(&handle->props, retrieve, state, flags, features);
 }
 
 LV2_State_Interface state_iface = {
