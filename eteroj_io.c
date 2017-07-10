@@ -30,8 +30,8 @@
 #include <props.h>
 #include <tlsf.h>
 
-#define POOL_SIZE 0x20000 // 128KB
-#define BUF_SIZE 0x10000
+#define POOL_SIZE 0x800000 // 8M
+#define BUF_SIZE 0x100000 // 1M
 #define MAX_NPROPS 3
 #define STR_LEN 512
 
