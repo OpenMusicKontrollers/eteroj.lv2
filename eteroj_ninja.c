@@ -23,6 +23,7 @@
 #include <osc.lv2/util.h>
 #include <osc.lv2/forge.h>
 
+#define NETATOM_IMPLEMENTATION
 #include <netatom.lv2/netatom.h>
 
 #define NS_RDF "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -50,11 +51,12 @@ struct _plughandle_t {
 	LV2_OSC_URID osc_urid;
 	int64_t frames;
 
-	netatom_t *netatom_tx;
-	netatom_t *netatom_rx;
+	netatom_t *netatom;
 
 	varchunk_t *to_worker;
 	varchunk_t *from_worker;
+
+	uint8_t buf [BUF_SIZE];
 };
 		
 static const char *base_path = "/ninja";
@@ -136,12 +138,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 
-	handle->netatom_tx= netatom_new(handle->map, handle->unmap, true);
-	handle->netatom_rx= netatom_new(handle->map, handle->unmap, true);
-	if(!handle->netatom_tx || !handle->netatom_rx)
+	handle->netatom= netatom_new(handle->map, handle->unmap, true);
+	if(!handle->netatom)
 	{
-		netatom_free(handle->netatom_tx);
-		netatom_free(handle->netatom_rx);
+		netatom_free(handle->netatom);
 		free(handle);
 		return NULL;
 	}
@@ -193,8 +193,8 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 	if(itr->type != forge->Chunk)
 		return;
 
-	const LV2_Atom *atom = netatom_deserialize(handle->netatom_rx,
-		LV2_ATOM_BODY_CONST(itr), itr->size);
+	const LV2_Atom *atom = netatom_deserialize(handle->netatom,
+		LV2_ATOM_BODY(itr), itr->size);
 	if(atom)
 	{
 		lv2_atom_forge_frame_time(forge, handle->frames);
@@ -251,8 +251,7 @@ cleanup(LV2_Handle instance)
 		varchunk_free(handle->to_worker);
 	if(handle->from_worker)
 		varchunk_free(handle->from_worker);
-	netatom_free(handle->netatom_rx);
-	netatom_free(handle->netatom_tx);
+	netatom_free(handle->netatom);
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
 }
@@ -295,8 +294,10 @@ _work(LV2_Handle instance,
 			}
 			else
 			{
-				uint32_t sz;
-				const uint8_t *buf = netatom_serialize(handle->netatom_tx, atom, &sz);
+				memcpy(handle->buf, atom, lv2_atom_total_size(atom)); //FIXME check < BUF_SIZE
+
+				size_t sz;
+				const uint8_t *buf = netatom_serialize(handle->netatom, (LV2_Atom *)handle->buf, BUF_SIZE, &sz);
 				if(buf)
 				{
 					lv2_atom_forge_frame_time(forge, ev->time.frames);
