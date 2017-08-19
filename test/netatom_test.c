@@ -16,10 +16,13 @@
  */
 
 #include <time.h>
-#include <netatom.lv2/netatom.h>
 #include <sratom/sratom.h>
 
+#define NETATOM_IMPLEMENTATION
+#include <netatom.lv2/netatom.h>
+
 #define MAX_URIDS 2048
+#define MAX_BUF 4092
 
 typedef struct _urid_t urid_t;
 typedef struct _handle_t handle_t;
@@ -81,31 +84,36 @@ static void
 _netatom_test(LV2_URID_Map *map, LV2_URID_Unmap *unmap, bool swap,
 	const LV2_Atom *atom, unsigned iterations)
 {
-	netatom_t *netatom_tx = netatom_new(map, unmap, swap);
-	netatom_t *netatom_rx = netatom_new(map, unmap, swap);
+	static uint8_t buf [MAX_BUF];
+	netatom_t *netatom = netatom_new(map, unmap, swap);
+	assert(netatom);
 
 	for(unsigned i = 0; i < iterations; i++)
 	{
-		uint32_t size_tx;
-		const uint8_t *buf_tx = netatom_serialize(netatom_tx, atom, &size_tx);
+		memcpy(buf, atom, lv2_atom_total_size(atom));
+
+		size_t size_tx;
+		uint8_t *buf_tx = netatom_serialize(netatom, (LV2_Atom *)buf, MAX_BUF, &size_tx);
+		assert(buf_tx);
 
 		if(iterations == 1)
 		{
 			fwrite(buf_tx, size_tx, 1, stdout);
 
-			fprintf(stderr, "%u, %u, %f\n", lv2_atom_total_size(atom), size_tx,
-				(float)size_tx / lv2_atom_total_size(atom));
+			fprintf(stderr, "%u, %zu, %f\n", lv2_atom_total_size(atom), size_tx,
+					(float)size_tx / lv2_atom_total_size(atom));
 		}
 
-		const LV2_Atom *atom_rx = netatom_deserialize(netatom_rx, buf_tx, size_tx);
+		const LV2_Atom *atom_rx = netatom_deserialize(netatom, buf_tx, size_tx);
+		assert(atom_rx);
+
 		const uint32_t size_rx = lv2_atom_total_size(atom_rx);
 
-		assert(size_rx == lv2_atom_pad_size(lv2_atom_total_size(atom)));
+		assert(size_rx == lv2_atom_total_size(atom));
 		assert(memcmp(atom, atom_rx, size_rx) == 0);
 	}
 
-	netatom_free(netatom_tx);
-	netatom_free(netatom_rx);
+	netatom_free(netatom);
 }
 
 static void
