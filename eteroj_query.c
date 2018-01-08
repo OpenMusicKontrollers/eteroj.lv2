@@ -803,13 +803,11 @@ run(LV2_Handle instance, uint32_t nsamples)
 				const LV2_Atom_URID *property = NULL;
 				const LV2_Atom *value = NULL;
 
-				LV2_Atom_Object_Query q[] = {
-					{ handle->urid.patch_subject, (const LV2_Atom **)&subject },
-					{ handle->urid.patch_property, (const LV2_Atom **)&property },
-					{ handle->urid.patch_value, &value },
-					LV2_ATOM_OBJECT_QUERY_END
-				};
-				lv2_atom_object_query(obj, q);
+				lv2_atom_object_get(obj,
+					handle->urid.patch_subject, &subject,
+					handle->urid.patch_property, &property,
+					handle->urid.patch_value, &value,
+					0);
 
 				if(!property || !value)
 					continue;
@@ -865,12 +863,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 				const LV2_Atom_URID *subject = NULL;
 				const LV2_Atom_URID *property = NULL;
 
-				LV2_Atom_Object_Query q[] = {
-					{ handle->urid.patch_subject, (const LV2_Atom **)&subject },
-					{ handle->urid.patch_property, (const LV2_Atom **)&property },
-					LV2_ATOM_OBJECT_QUERY_END
-				};
-				lv2_atom_object_query(obj, q);
+				lv2_atom_object_get(obj,
+					handle->urid.patch_subject, &subject,
+					handle->urid.patch_property, &property,
+					0);
 
 				if(subject && (subject->body != handle->urid.subject))
 					continue; // subject not matching
