@@ -592,13 +592,11 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		const LV2_Atom_URID *property = NULL;
 		const LV2_Atom_Int *sequence = NULL;
 
-		LV2_Atom_Object_Query q [] = {
-			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
-			{ props->urid.patch_property, (const LV2_Atom **)&property },
-			{ props->urid.patch_sequence, (const LV2_Atom **)&sequence },
-			LV2_ATOM_OBJECT_QUERY_END
-		};
-		lv2_atom_object_query(obj, q);
+		lv2_atom_object_get(obj,
+			props->urid.patch_subject, &subject,
+			props->urid.patch_property, &property,
+			props->urid.patch_sequence, &sequence,
+			0);
 
 		// check for a matching optional subject
 		if(  (subject && props->urid.subject)
@@ -656,14 +654,12 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		const LV2_Atom_Int *sequence = NULL;
 		const LV2_Atom *value = NULL;
 
-		LV2_Atom_Object_Query q [] = {
-			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
-			{ props->urid.patch_property, (const LV2_Atom **)&property },
-			{ props->urid.patch_sequence, (const LV2_Atom **)&sequence },
-			{ props->urid.patch_value, &value },
-			LV2_ATOM_OBJECT_QUERY_END
-		};
-		lv2_atom_object_query(obj, q);
+		lv2_atom_object_get(obj,
+			props->urid.patch_subject, &subject,
+			props->urid.patch_property, &property,
+			props->urid.patch_sequence, &sequence,
+			props->urid.patch_value, &value,
+			0);
 
 		// check for a matching optional subject
 		if(  (subject && props->urid.subject)
@@ -717,13 +713,11 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		const LV2_Atom_Int *sequence = NULL;
 		const LV2_Atom_Object *body = NULL;
 
-		LV2_Atom_Object_Query q [] = {
-			{ props->urid.patch_subject, (const LV2_Atom **)&subject },
-			{ props->urid.patch_sequence, (const LV2_Atom **)&sequence},
-			{ props->urid.patch_body, (const LV2_Atom **)&body },
-			LV2_ATOM_OBJECT_QUERY_END
-		};
-		lv2_atom_object_query(obj, q);
+		lv2_atom_object_get(obj,
+			props->urid.patch_subject, &subject,
+			props->urid.patch_sequence, &sequence,
+			props->urid.patch_body, &body,
+			0);
 
 		// check for a matching optional subject
 		if(  (subject && props->urid.subject)
