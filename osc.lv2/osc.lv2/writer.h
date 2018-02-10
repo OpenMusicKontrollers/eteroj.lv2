@@ -549,7 +549,7 @@ lv2_osc_writer_packet(LV2_OSC_Writer *writer, LV2_OSC_URID *osc_urid,
 					}
 					else if(lit->body.datatype == osc_urid->OSC_RGBA)
 					{
-						const uint8_t *rgba = LV2_ATOM_CONTENTS_CONST(LV2_Atom_Literal, atom);
+						const char *rgba = LV2_ATOM_CONTENTS_CONST(LV2_Atom_Literal, atom);
 						uint8_t r, g, b, a;
 						if(sscanf(rgba, "%02"SCNx8"%02"SCNx8"%02"SCNx8"%02"SCNx8, &r, &g, &b, &a) != 4)
 							return false;
