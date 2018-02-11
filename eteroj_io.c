@@ -27,7 +27,7 @@
 #include <osc.lv2/stream.h>
 #include <props.h>
 #include <tlsf.h>
-#if !defined(_WIN32) && !defined(__APPLE__)
+#if !defined(_WIN32)
 #	include <semaphore.h>
 #endif
 
@@ -104,8 +104,9 @@ struct _plughandle_t {
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
 		varchunk_t *to_thread;
-#if !defined(_WIN32) && !defined(__APPLE__)
-		sem_t sem;
+#if !defined(_WIN32)
+		sem_t *sem;
+		char id [32];
 #endif
 	} data;
 };
@@ -218,8 +219,8 @@ _url_change(plughandle_t *handle, const char *url)
 		{
 			memcpy(dst, buf, size);
 			varchunk_write_advance(handle->data.to_thread, size);
-#if !defined(_WIN32) && !defined(__APPLE__)
-			sem_post(&handle->data.sem);
+#if !defined(_WIN32)
+			sem_post(handle->data.sem);
 #endif
 		}
 	}
@@ -330,8 +331,9 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.read_req = _data_send_req;
 	handle->data.driver.read_adv = _data_send_adv;
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-	sem_init(&handle->data.sem, 0, 0);
+#if !defined(_WIN32)
+	snprintf(handle->data.id, sizeof(handle->data.id), "/eteroj-%016"PRIx64, (uint64_t)handle);
+	handle->data.sem = sem_open(handle->data.id, O_CREAT, S_IRUSR | S_IWUSR, 0);
 #endif
 
 	if(!props_init(&handle->props, descriptor->URI,
@@ -398,8 +400,16 @@ _thread(void *data)
 
 	while(!atomic_load_explicit(&handle->done, memory_order_relaxed))
 	{
-#if !defined(_WIN32) && !defined(__APPLE__)
-		if( (sem_timedwait(&handle->data.sem, &abs) == -1)
+#if defined(_WIN32)
+		usleep(1000); // 1 ms
+#elif defined(__APPLE__)
+		if(  (sem_trywait(handle->data.sem) == -1)
+			&& (errno == EAGAIN) )
+		{
+			usleep(1000); // 1ms
+		}
+#else
+		if(  (sem_timedwait(handle->data.sem, &abs) == -1)
 			&& (errno == ETIMEDOUT) )
 		{
 			abs.tv_nsec += 1000000; // + 1ms
@@ -409,8 +419,6 @@ _thread(void *data)
 				abs.tv_sec += 1;
 			}
 		}
-#else
-		usleep(1000); // 1 ms
 #endif
 
 		size_t size;
@@ -603,8 +611,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 					if(written)
 					{
 						varchunk_write_advance(handle->data.to_worker, written);
-#if !defined(_WIN32) && !defined(__APPLE__)
-						sem_post(&handle->data.sem);
+#if !defined(_WIN32)
+						sem_post(handle->data.sem);
 #endif
 					}
 				}
@@ -681,8 +689,8 @@ deactivate(LV2_Handle instance)
 	plughandle_t *handle = instance;
 
 	atomic_store_explicit(&handle->done, true, memory_order_relaxed);
-#if !defined(_WIN32) && !defined(__APPLE__)
-	sem_post(&handle->data.sem);
+#if !defined(_WIN32)
+	sem_post(handle->data.sem);
 #endif
 	pthread_join(handle->thread, NULL);
 }
@@ -696,8 +704,9 @@ cleanup(LV2_Handle instance)
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 	varchunk_free(handle->data.to_thread);
-#if !defined(_WIN32) && !defined(__APPLE__)
-	sem_destroy(&handle->data.sem);
+#if !defined(_WIN32)
+	sem_close(handle->data.sem);
+	sem_unlink(handle->data.id);
 #endif
 
 	munlock(handle, sizeof(plughandle_t));
