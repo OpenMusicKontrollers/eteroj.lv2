@@ -53,11 +53,11 @@ i686-linux-gnu:
 arm-linux-gnueabihf:
   <<: *arm_linux_definition
 
-x86_64-w64-mingw32:
-  <<: *universal_w64_definition
+#x86_64-w64-mingw32:
+#  <<: *universal_w64_definition
 
-i686-w64-mingw32:
-  <<: *universal_w64_definition
+#i686-w64-mingw32:
+#  <<: *universal_w64_definition
 
 universal-apple-darwin:
   <<: *universal_apple_definition

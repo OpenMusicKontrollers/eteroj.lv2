@@ -17,18 +17,17 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <uv.h>
-
-#include <osc_stream.h>
+#include <pthread.h>
 
 #include <eteroj.h>
 #include <varchunk.h>
 #include <osc.lv2/reader.h>
 #include <osc.lv2/writer.h>
 #include <osc.lv2/forge.h>
+#include <osc.lv2/stream.h>
 #include <props.h>
 #include <tlsf.h>
+#include <semaphore.h>
 
 #define POOL_SIZE 0x800000 // 8M
 #define BUF_SIZE 0x100000 // 1M
@@ -78,10 +77,7 @@ struct _plughandle_t {
 	LV2_Atom_Forge forge;
 	LV2_Atom_Forge_Ref ref;
 
-	volatile bool needs_flushing;
 	volatile bool status_updated;
-	volatile bool reconnection_requested;
-	char worker_url [STR_LEN];
 
 	plugstate_t state;
 	plugstate_t stash;
@@ -92,8 +88,7 @@ struct _plughandle_t {
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
 
-	uv_thread_t thread;
-	uv_loop_t loop;
+	pthread_t thread;
 	atomic_bool done;
 
 	LV2_OSC_Schedule *osc_sched;
@@ -102,11 +97,12 @@ struct _plughandle_t {
 	tlsf_t tlsf;
 
 	struct {
-		osc_stream_driver_t driver;
-		osc_stream_t *stream;
+		LV2_OSC_Driver driver;
+		LV2_OSC_Stream stream;
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
 		varchunk_t *to_thread;
+		sem_t sem;
 	} data;
 };
 
@@ -166,20 +162,16 @@ static const LV2_State_Interface state_iface = {
 
 // non-rt
 static void *
-_data_recv_req(size_t size, void *data)
+_data_recv_req(void *data, size_t size, size_t *max)
 {
 	plughandle_t *handle = data;
 
-	void *ptr;
-	do ptr = varchunk_write_request(handle->data.from_worker, size);
-	while(!ptr);
-
-	return ptr;
+	return varchunk_write_request_max(handle->data.from_worker, size, max);
 }
 
 // non-rt
 static void
-_data_recv_adv(size_t written, void *data)
+_data_recv_adv(void *data, size_t written)
 {
 	plughandle_t *handle = data;
 
@@ -188,7 +180,7 @@ _data_recv_adv(size_t written, void *data)
 
 // non-rt
 static const void *
-_data_send_req(size_t *len, void *data)
+_data_send_req(void *data, size_t *len)
 {
 	plughandle_t *handle = data;
 
@@ -202,16 +194,6 @@ _data_send_adv(void *data)
 	plughandle_t *handle = data;
 
 	varchunk_read_advance(handle->data.to_worker);
-}
-
-// non-rt
-static void
-_data_free(void *data)
-{
-	plughandle_t *handle = data;
-
-	//handle->data.stream = NULL;
-	handle->reconnection_requested = true;
 }
 
 // rt
@@ -232,6 +214,7 @@ _url_change(plughandle_t *handle, const char *url)
 		{
 			memcpy(dst, buf, size);
 			varchunk_write_advance(handle->data.to_thread, size);
+			sem_post(&handle->data.sem);
 		}
 	}
 }
@@ -336,11 +319,12 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->data.driver.recv_req = _data_recv_req;
-	handle->data.driver.recv_adv = _data_recv_adv;
-	handle->data.driver.send_req = _data_send_req;
-	handle->data.driver.send_adv = _data_send_adv;
-	handle->data.driver.free = _data_free;
+	handle->data.driver.write_req = _data_recv_req;
+	handle->data.driver.write_adv = _data_recv_adv;
+	handle->data.driver.read_req = _data_send_req;
+	handle->data.driver.read_adv = _data_send_adv;
+
+	sem_init(&handle->data.sem, 0, 0);
 
 	if(!props_init(&handle->props, descriptor->URI,
 		defs, MAX_NPROPS, &handle->state, &handle->stash,
@@ -377,12 +361,10 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 	}
 }
 
-static void
+static void *
 _thread(void *data)
 {
 	plughandle_t *handle = data;
-
-	uv_loop_init(&handle->loop);
 
 #if !defined(_WIN32) && !defined(__APPLE__)
 	pthread_t self = pthread_self();
@@ -398,16 +380,23 @@ _thread(void *data)
 	}
 #endif
 
+	bool rolling = false;
+	const char *osc_url = NULL;
+
+	struct timespec abs;
+	clock_gettime(CLOCK_REALTIME, &abs);
+
 	while(!atomic_load_explicit(&handle->done, memory_order_relaxed))
 	{
-		usleep(1000); //FIXME solve this differently
-
-		if(handle->reconnection_requested)
+		if( (sem_timedwait(&handle->data.sem, &abs) == -1)
+			&& (errno == ETIMEDOUT) )
 		{
-			handle->data.stream = osc_stream_new(&handle->loop, handle->worker_url,
-				&handle->data.driver, handle);
-
-			handle->reconnection_requested = false;
+			abs.tv_nsec += 1000000; // + 1ms
+			while(abs.tv_nsec >= 1000000000)
+			{
+				abs.tv_nsec -= 1000000000;
+				abs.tv_sec += 1;
+			}
 		}
 
 		size_t size;
@@ -419,46 +408,35 @@ _thread(void *data)
 			lv2_osc_reader_initialize(&reader, body, size);
 			lv2_osc_reader_arg_begin(&reader, &arg, size);
 
-			if(!strcmp(arg.path, "/eteroj/flush"))
+			if(!strcmp(arg.path, "/eteroj/url"))
 			{
-				osc_stream_flush(handle->data.stream);
-			}
-			else if(!strcmp(arg.path, "/eteroj/recv"))
-			{
-				// nothing
-			}
-			else if(!strcmp(arg.path, "/eteroj/url"))
-			{
-				const char *osc_url = arg.s;
+				osc_url = arg.s;
 
-				strcpy(handle->worker_url, osc_url);
-
-				if(handle->data.stream)
+				if(rolling)
 				{
-					osc_stream_free(handle->data.stream);
-					handle->data.stream = NULL;
-				}
-				else
-				{
-					handle->reconnection_requested = true;
+					lv2_osc_stream_deinit(&handle->data.stream);
+					rolling = false;
 				}
 			}
 
 			varchunk_read_advance(handle->data.to_thread);
 		}
 
-		uv_run(&handle->loop, UV_RUN_NOWAIT);
+		if(!rolling && osc_url)
+		{
+			rolling = lv2_osc_stream_init(&handle->data.stream, osc_url,
+				&handle->data.driver, handle) == 0;
+			//printf("url: %s %i\n", osc_url, rolling);
+		}
+
+		if(rolling)
+			lv2_osc_stream_run(&handle->data.stream);
 	}
 
-	if(handle->data.stream)
-	{
-		osc_stream_free(handle->data.stream);
-		handle->data.stream = NULL;
-	}
+	if(rolling)
+		lv2_osc_stream_deinit(&handle->data.stream);
 
-	uv_run(&handle->loop, UV_RUN_NOWAIT);
-
-	uv_loop_close(&handle->loop);
+	return NULL;
 }
 
 static void
@@ -467,7 +445,7 @@ activate(LV2_Handle instance)
 	plughandle_t *handle = instance;
 
 	atomic_init(&handle->done, false);
-	uv_thread_create(&handle->thread, _thread, handle);
+	pthread_create(&handle->thread, NULL, _thread, handle);
 }
 
 static inline void
@@ -478,12 +456,12 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 	lv2_osc_reader_initialize(&reader, buf, size);
 	lv2_osc_reader_arg_begin(&reader, &arg, size);
 
+#if 0
 	if(!strcmp(arg.path, "/stream/resolve"))
 	{
 		_set_status(handle, STATUS_READY);
 		_set_error(handle, "");
 
-		handle->needs_flushing = true;
 		handle->status_updated = true;
 	}
 	else if(!strcmp(arg.path, "/stream/timeout"))
@@ -510,7 +488,6 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 		_set_status(handle, STATUS_CONNECTED);
 		_set_error(handle, "");
 
-		handle->needs_flushing = true;
 		handle->status_updated = true;
 	}
 	else if(!strcmp(arg.path, "/stream/disconnect"))
@@ -521,6 +498,7 @@ _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 		handle->status_updated = true;
 	}
 	else // general message
+#endif
 	{
 		if(handle->ref)
 			handle->ref = lv2_atom_forge_frame_time(&handle->forge, frames);
@@ -572,9 +550,6 @@ _unroll(plughandle_t *handle, const uint8_t *buf, size_t size)
 	}
 }
 
-static const char flush_msg [] = "/eteroj/flush\0\0\0,\0\0\0";
-static const char recv_msg [] = "/eteroj/recv\0\0\0\0,\0\0\0";
-
 static void
 run(LV2_Handle instance, uint32_t nsamples)
 {
@@ -583,7 +558,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 	LV2_Atom_Forge *forge = &handle->forge;
 	LV2_Atom_Forge_Frame frame;
 	uint32_t capacity;
-	handle->needs_flushing = false;
 
 	// prepare sequence forges
 	capacity = handle->osc_out->atom.size;
@@ -615,31 +589,12 @@ run(LV2_Handle instance, uint32_t nsamples)
 					if(written)
 					{
 						varchunk_write_advance(handle->data.to_worker, written);
-						handle->needs_flushing = true;
+						sem_post(&handle->data.sem);
 					}
 				}
 				else if(handle->log)
 					lv2_log_trace(&handle->logger, "output ringbuffer overflow");
 			}
-		}
-	}
-
-	if(handle->needs_flushing)
-	{
-		uint8_t *dst;
-		if((dst = varchunk_write_request(handle->data.to_thread, sizeof(flush_msg))))
-		{
-			memcpy(dst, flush_msg, sizeof(flush_msg));
-			varchunk_write_advance(handle->data.to_thread, sizeof(flush_msg));
-		}
-	}
-	else
-	{
-		uint8_t *dst;
-		if((dst = varchunk_write_request(handle->data.to_thread, sizeof(recv_msg))))
-		{
-			memcpy(dst, recv_msg, sizeof(recv_msg));
-			varchunk_write_advance(handle->data.to_thread, sizeof(recv_msg));
 		}
 	}
 
@@ -710,7 +665,8 @@ deactivate(LV2_Handle instance)
 	plughandle_t *handle = instance;
 
 	atomic_store_explicit(&handle->done, true, memory_order_relaxed);
-	uv_thread_join(&handle->thread);
+	sem_post(&handle->data.sem);
+	pthread_join(handle->thread, NULL);
 }
 
 static void
@@ -722,6 +678,7 @@ cleanup(LV2_Handle instance)
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 	varchunk_free(handle->data.to_thread);
+	sem_destroy(&handle->data.sem);
 
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
