@@ -22,6 +22,7 @@
 #include <varchunk.h>
 #include <osc.lv2/util.h>
 #include <osc.lv2/forge.h>
+#include <props.h>
 
 #define NETATOM_IMPLEMENTATION
 #include <netatom.lv2/netatom.h>
@@ -29,8 +30,11 @@
 #define NS_RDF "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define BUF_SIZE 8192
 
+#define MAX_NPROPS 1
+
 typedef struct _atom_ser_t atom_ser_t;
 typedef struct _plughandle_t plughandle_t;
+typedef struct _plugstate_t plugstate_t;
 
 struct _atom_ser_t {
 	uint32_t size;
@@ -38,10 +42,15 @@ struct _atom_ser_t {
 	uint32_t offset;
 };
 
+struct _plugstate_t {
+	int32_t synchronous;
+};
+
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_URID_Unmap *unmap;
 	LV2_Worker_Schedule *sched;
+	LV2_Atom_Forge_Ref ref;
 
 	atom_ser_t ser;
 
@@ -55,6 +64,10 @@ struct _plughandle_t {
 
 	varchunk_t *to_worker;
 	varchunk_t *from_worker;
+
+	PROPS_T(props, MAX_NPROPS);
+	plugstate_t state;
+	plugstate_t stash;
 
 	uint8_t buf [BUF_SIZE];
 };
@@ -97,6 +110,14 @@ _deref(LV2_Atom_Forge_Sink_Handle handle, LV2_Atom_Forge_Ref ref)
 	return (LV2_Atom *)(ser->buf + offset);
 }
 
+static const props_def_t defs [MAX_NPROPS] = {
+	{
+		.property = ETEROJ_URI"#ninja_synchronous",
+		.offset = offsetof(plugstate_t, synchronous),
+		.type = LV2_ATOM__Bool
+	}
+};
+
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
 	const char *bundle_path, const LV2_Feature *const *features)
@@ -137,6 +158,14 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	lv2_osc_urid_init(&handle->osc_urid, handle->map);
+
+	if(!props_init(&handle->props, descriptor->URI,
+		defs, MAX_NPROPS, &handle->state, &handle->stash,
+		handle->map, handle))
+	{
+		free(handle);
+		return NULL;
+	}
 
 	handle->netatom= netatom_new(handle->map, handle->unmap, true);
 	if(!handle->netatom)
@@ -197,8 +226,10 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 		LV2_ATOM_BODY(itr), itr->size);
 	if(atom)
 	{
-		lv2_atom_forge_frame_time(forge, handle->frames);
-		lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
+		if(handle->ref)
+			handle->ref = lv2_atom_forge_frame_time(forge, handle->frames);
+		if(handle->ref)
+			handle->ref = lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
 	}
 }
 
@@ -210,33 +241,49 @@ run(LV2_Handle instance, uint32_t nsamples)
 	// prepare osc atom forge
 	const uint32_t capacity = handle->event_out->atom.size;
 
-	// move input events to worker thread
-	if(handle->event_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
+	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
+
+	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
-		const size_t size = lv2_atom_total_size(&handle->event_in->atom);
-		LV2_Atom_Sequence *seq;
-		if((seq = varchunk_write_request(handle->to_worker, size)))
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+
+		props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref);
+	}
+
+	if(handle->state.synchronous)
+	{
+		//FIXME
+	}
+	else // asynchronous
+	{
+		// move input events to worker thread
+		if(handle->event_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
 		{
-			memcpy(seq, handle->event_in, size);
-			varchunk_write_advance(handle->to_worker, size);
+			const size_t size = lv2_atom_total_size(&handle->event_in->atom);
+			LV2_Atom_Sequence *seq;
+			if((seq = varchunk_write_request(handle->to_worker, size)))
+			{
+				memcpy(seq, handle->event_in, size);
+				varchunk_write_advance(handle->to_worker, size);
 
-			const int32_t dummy;
-			handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
+				const int32_t dummy;
+				handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
+			}
 		}
-	}
 
-	// move output events from worker thread
-	size_t size;
-	const LV2_Atom_Sequence *seq;
-	if((seq = varchunk_read_request(handle->from_worker, &size)))
-	{
-		if(size <= capacity)
-			memcpy(handle->event_out, seq, size);
-		varchunk_read_advance(handle->from_worker);
-	}
-	else
-	{
-		lv2_atom_sequence_clear(handle->event_out);
+		// move output events from worker thread
+		size_t size;
+		const LV2_Atom_Sequence *seq;
+		if((seq = varchunk_read_request(handle->from_worker, &size)))
+		{
+			if(size <= capacity)
+				memcpy(handle->event_out, seq, size);
+			varchunk_read_advance(handle->from_worker);
+		}
+		else
+		{
+			lv2_atom_sequence_clear(handle->event_out);
+		}
 	}
 }
 
@@ -256,6 +303,38 @@ cleanup(LV2_Handle instance)
 	free(handle);
 }
 
+static void
+_convert_seq(plughandle_t *handle, LV2_Atom_Forge *forge, const LV2_Atom_Sequence *seq)
+{
+	LV2_OSC_URID *osc_urid = &handle->osc_urid;
+
+	LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+	{
+		const LV2_Atom *atom = &ev->body;
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+
+		if(lv2_osc_is_message_or_bundle_type(osc_urid, obj->body.otype))
+		{
+			handle->frames = ev->time.frames;
+			lv2_osc_unroll(osc_urid, obj, _unroll, handle);
+		}
+		else
+		{
+			memcpy(handle->buf, atom, lv2_atom_total_size(atom)); //FIXME check < BUF_SIZE
+
+			size_t sz;
+			const uint8_t *buf = netatom_serialize(handle->netatom, (LV2_Atom *)handle->buf, BUF_SIZE, &sz);
+			if(buf)
+			{
+				if(handle->ref)
+					handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
+				if(handle->ref)
+					handle->ref = lv2_osc_forge_message_vararg(forge, osc_urid, base_path, "b", sz, buf);
+			}
+		}
+	}
+}
+
 // non-rt thread
 static LV2_Worker_Status
 _work(LV2_Handle instance,
@@ -265,7 +344,7 @@ _work(LV2_Handle instance,
 	const void *body)
 {
 	plughandle_t *handle = instance;
-	LV2_Atom_Forge *forge = &handle->forge;
+	LV2_Atom_Forge forge = handle->forge;
 	LV2_OSC_URID *osc_urid = &handle->osc_urid;
 
 	(void)respond;
@@ -278,35 +357,14 @@ _work(LV2_Handle instance,
 	while((seq = varchunk_read_request(handle->to_worker, &_size)))
 	{
 		handle->ser.offset = 0;
-		lv2_atom_forge_set_sink(forge, _sink, _deref, &handle->ser);
+		lv2_atom_forge_set_sink(&forge, _sink, _deref, &handle->ser);
 		LV2_Atom_Forge_Frame frame;
-		lv2_atom_forge_sequence_head(forge, &frame, 0);
+		handle->ref = lv2_atom_forge_sequence_head(&forge, &frame, 0);
 
-		LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
-		{
-			const LV2_Atom *atom = &ev->body;
-			const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+		_convert_seq(handle, &forge, seq);
 
-			if(lv2_osc_is_message_or_bundle_type(osc_urid, obj->body.otype))
-			{
-				handle->frames = ev->time.frames;
-				lv2_osc_unroll(osc_urid, obj, _unroll, handle);
-			}
-			else
-			{
-				memcpy(handle->buf, atom, lv2_atom_total_size(atom)); //FIXME check < BUF_SIZE
-
-				size_t sz;
-				const uint8_t *buf = netatom_serialize(handle->netatom, (LV2_Atom *)handle->buf, BUF_SIZE, &sz);
-				if(buf)
-				{
-					lv2_atom_forge_frame_time(forge, ev->time.frames);
-					lv2_osc_forge_message_vararg(forge, &handle->osc_urid, base_path, "b", sz, buf);
-				}
-			}
-		}
-
-		lv2_atom_forge_pop(forge, &frame);
+		if(handle->ref)
+			lv2_atom_forge_pop(&forge, &frame);
 
 		seq = (const LV2_Atom_Sequence *)handle->ser.buf;
 		if(seq->atom.size > sizeof(LV2_Atom_Sequence_Body))
@@ -350,11 +408,38 @@ static const LV2_Worker_Interface work_iface = {
 	.end_run = _end_run
 };
 
+static LV2_State_Status
+_state_save(LV2_Handle instance, LV2_State_Store_Function store,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	return props_save(&handle->props, store, state, flags, features);
+}
+
+static LV2_State_Status
+_state_restore(LV2_Handle instance, LV2_State_Retrieve_Function retrieve,
+	LV2_State_Handle state, uint32_t flags,
+	const LV2_Feature *const *features)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	return props_restore(&handle->props, retrieve, state, flags, features);
+}
+
+static const LV2_State_Interface state_iface = {
+	.save = _state_save,
+	.restore = _state_restore
+};
+
 static const void*
 extension_data(const char* uri)
 {
 	if(!strcmp(uri, LV2_WORKER__interface))
 		return &work_iface;
+	else if(!strcmp(uri, LV2_STATE__interface))
+		return &state_iface;
 
 	return NULL;
 }

@@ -335,6 +335,12 @@ eteroj:pack
 		eteroj:pack_path "/midi" ;
 		eteroj:pack_format 0 ;
 	] .
+
+eteroj:ninja_synchronous
+	a lv2:Parameter ;
+	rdfs:range atom:Bool ;
+	rdfs:comment "toggle to run (a)synchronously" ;
+	rdfs:label "Synchronous" .
 	
 # Ninja Plugin
 eteroj:ninja
@@ -343,16 +349,17 @@ eteroj:ninja
 	doap:name "Eteroj Ninja" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap, work:schedule ;
-	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
-	lv2:extensionData work:interface ;
+	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore ;
+	lv2:extensionData work:interface, state:interface ;
 
 	# input event port
 	lv2:port [
 	  a lv2:InputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports osc:Event ;
+		atom:supports osc:Event ,
+			patch:Message ;
 		lv2:index 0 ;
 		lv2:symbol "event_in" ;
 		lv2:name "Event Input" ;
@@ -362,13 +369,20 @@ eteroj:ninja
 	  a lv2:OutputPort ,
 			atom:AtomPort ;
 		atom:bufferType atom:Sequence ;
-		atom:supports osc:Event ;
+		atom:supports osc:Event ,
+			patch:Message ;
 		lv2:index 1 ;
 		lv2:symbol "event_out" ;
 		lv2:name "Event Output" ;
 		lv2:designation lv2:control ;
-	] .
+	] ;
 
+	patch:writable
+		eteroj:ninja_synchronous ;
+
+	state:state [
+		ninja:ninja_synchronous false
+	] .
 
 eteroj:control_learn_1
 	a lv2:Parameter ;
