@@ -62,7 +62,7 @@ add_library(eteroj MODULE
 	eteroj_control.c
 	tlsf-3.0/tlsf.c
 	jsmn/jsmn.c)
-target_link_libraries(eteroj m pthread)
+target_link_libraries(eteroj m)
 set_target_properties(eteroj PROPERTIES PREFIX "")
 install(TARGETS eteroj DESTINATION ${PLUGIN_DEST})
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/eteroj.ttl DESTINATION ${PLUGIN_DEST})

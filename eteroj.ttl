@@ -60,7 +60,7 @@ proj:eteroj
 eteroj:url
 	a lv2:Parameter ;
 	rdfs:label "Url" ;
-	rdfs:comment "eg. osc.udp://localhost:3030, osc.slip.tcp6://:4040" ;
+	rdfs:comment "eg. osc.udp://localhost:9090, osc.tcp://[::1]:4040" ;
 	rdfs:range atom:String .
 
 eteroj:error
@@ -82,9 +82,9 @@ eteroj:io
 	doap:name "Eteroj IO" ;
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap, state:loadDefaultState ;
+	lv2:requiredFeature urid:map, urid:unmap, work:schedule , state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
-	lv2:extensionData state:interface ;
+	lv2:extensionData work:interface, state:interface ;
 
 	lv2:port [
 		# sink event port
@@ -121,7 +121,7 @@ eteroj:io
 
 	# default state
 	state:state [
-		eteroj:url "osc.udp4://localhost:9090" ;
+		eteroj:url "osc.udp://localhost:9090" ;
 	] .
 
 # Disk Plugin
@@ -351,7 +351,7 @@ eteroj:ninja
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore ;
-	lv2:extensionData work:interface, state:interface ;
+	lv2:extensionData state:interface, work:interface ;
 
 	# input event port
 	lv2:port [
@@ -381,7 +381,7 @@ eteroj:ninja
 		eteroj:ninja_synchronous ;
 
 	state:state [
-		ninja:ninja_synchronous false
+		eteroj:ninja_synchronous false
 	] .
 
 eteroj:control_learn_1

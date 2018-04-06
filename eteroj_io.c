@@ -17,7 +17,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 
 #include <eteroj.h>
 #include <varchunk.h>
@@ -27,9 +26,6 @@
 #include <osc.lv2/stream.h>
 #include <props.h>
 #include <tlsf.h>
-#if !defined(_WIN32)
-#	include <semaphore.h>
-#endif
 
 #define POOL_SIZE 0x800000 // 8M
 #define BUF_SIZE 0x100000 // 1M
@@ -66,6 +62,7 @@ struct _plugstate_t {
 struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_URID_Unmap *unmap;
+	LV2_Worker_Schedule *sched;
 	struct {
 		LV2_URID state_default;
 		LV2_URID subject;
@@ -80,6 +77,7 @@ struct _plughandle_t {
 	LV2_Atom_Forge_Ref ref;
 
 	volatile bool status_updated;
+	bool rolling;
 
 	plugstate_t state;
 	plugstate_t stash;
@@ -89,9 +87,6 @@ struct _plughandle_t {
 
 	const LV2_Atom_Sequence *osc_in;
 	LV2_Atom_Sequence *osc_out;
-
-	pthread_t thread;
-	atomic_bool done;
 
 	LV2_OSC_Schedule *osc_sched;
 	list_t *list;
@@ -104,10 +99,6 @@ struct _plughandle_t {
 		varchunk_t *from_worker;
 		varchunk_t *to_worker;
 		varchunk_t *to_thread;
-#if !defined(_WIN32)
-		sem_t *sem;
-		char id [32];
-#endif
 	} data;
 };
 
@@ -219,9 +210,6 @@ _url_change(plughandle_t *handle, const char *url)
 		{
 			memcpy(dst, buf, size);
 			varchunk_write_advance(handle->data.to_thread, size);
-#if !defined(_WIN32)
-			sem_post(handle->data.sem);
-#endif
 		}
 	}
 }
@@ -299,12 +287,20 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 			handle->log = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_OSC__schedule))
 			handle->osc_sched = features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
+			handle->sched= features[i]->data;
 	}
 
 	if(!handle->map || !handle->unmap)
 	{
 		fprintf(stderr,
 			"%s: Host does not support urid:(un)map\n", descriptor->URI);
+		free(handle);
+		return NULL;
+	}
+	if(!handle->sched)
+	{
+		fprintf(stderr, "%s: Host does not support work:schedule\n", descriptor->URI);
 		free(handle);
 		return NULL;
 	}
@@ -330,11 +326,6 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	handle->data.driver.write_adv = _data_recv_adv;
 	handle->data.driver.read_req = _data_send_req;
 	handle->data.driver.read_adv = _data_send_adv;
-
-#if !defined(_WIN32)
-	snprintf(handle->data.id, sizeof(handle->data.id), "/eteroj-%016"PRIx64, (uint64_t)handle);
-	handle->data.sem = sem_open(handle->data.id, O_CREAT, S_IRUSR | S_IWUSR, 0);
-#endif
 
 	if(!props_init(&handle->props, descriptor->URI,
 		defs, MAX_NPROPS, &handle->state, &handle->stash,
@@ -369,105 +360,6 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 		default:
 			break;
 	}
-}
-
-static void *
-_thread(void *data)
-{
-	plughandle_t *handle = data;
-
-#if !defined(_WIN32) && !defined(__APPLE__)
-	pthread_t self = pthread_self();
-
-	struct sched_param schedp;
-	memset(&schedp, 0, sizeof(struct sched_param));
-	schedp.sched_priority = 60; //FIXME make this configurable
-	
-	if(schedp.sched_priority)
-	{
-		if(pthread_setschedparam(self, SCHED_RR, &schedp))
-			fprintf(stderr, "pthread_setschedparam error\n");
-	}
-#endif
-
-	bool rolling = false;
-	const char *osc_url = NULL;
-
-#if !defined(_WIN32) && !defined(__APPLE__)
-	struct timespec abs;
-	clock_gettime(CLOCK_REALTIME, &abs);
-#endif
-
-	while(!atomic_load_explicit(&handle->done, memory_order_relaxed))
-	{
-#if defined(_WIN32)
-		usleep(1000); // 1 ms
-#elif defined(__APPLE__)
-		if(  (sem_trywait(handle->data.sem) == -1)
-			&& (errno == EAGAIN) )
-		{
-			usleep(1000); // 1ms
-		}
-#else
-		if(  (sem_timedwait(handle->data.sem, &abs) == -1)
-			&& (errno == ETIMEDOUT) )
-		{
-			abs.tv_nsec += 1000000; // + 1ms
-			while(abs.tv_nsec >= 1000000000)
-			{
-				abs.tv_nsec -= 1000000000;
-				abs.tv_sec += 1;
-			}
-		}
-#endif
-
-		size_t size;
-		const uint8_t *body;
-		while((body = varchunk_read_request(handle->data.to_thread, &size)))
-		{
-			LV2_OSC_Reader reader;
-			LV2_OSC_Arg arg;
-			lv2_osc_reader_initialize(&reader, body, size);
-			lv2_osc_reader_arg_begin(&reader, &arg, size);
-
-			if(!strcmp(arg.path, "/eteroj/url"))
-			{
-				osc_url = arg.s;
-
-				if(rolling)
-				{
-					lv2_osc_stream_deinit(&handle->data.stream);
-					rolling = false;
-				}
-			}
-
-			varchunk_read_advance(handle->data.to_thread);
-		}
-
-		if(!rolling && osc_url)
-		{
-			rolling = lv2_osc_stream_init(&handle->data.stream, osc_url,
-				&handle->data.driver, handle) == 0;
-			//printf("url: %s %i\n", osc_url, rolling);
-		}
-
-		if(rolling)
-			lv2_osc_stream_run(&handle->data.stream);
-	}
-
-	if(rolling)
-		lv2_osc_stream_deinit(&handle->data.stream);
-
-	return NULL;
-}
-
-static void
-activate(LV2_Handle instance)
-{
-	plughandle_t *handle = instance;
-
-	atomic_init(&handle->done, false);
-	pthread_create(&handle->thread, NULL, _thread, handle);
 }
 
 static inline void
@@ -611,9 +503,6 @@ run(LV2_Handle instance, uint32_t nsamples)
 					if(written)
 					{
 						varchunk_write_advance(handle->data.to_worker, written);
-#if !defined(_WIN32)
-						sem_post(handle->data.sem);
-#endif
 					}
 				}
 				else if(handle->log)
@@ -621,6 +510,10 @@ run(LV2_Handle instance, uint32_t nsamples)
 			}
 		}
 	}
+
+	// wake worker once per period
+	const uint32_t dummy = 0;
+	handle->sched->schedule_work(handle->sched->handle, sizeof(dummy), &dummy);
 
 	// reschedule scheduled bundles
 	if(handle->osc_sched)
@@ -683,16 +576,41 @@ run(LV2_Handle instance, uint32_t nsamples)
 		lv2_atom_sequence_clear(handle->osc_out);
 }
 
+static inline void
+_activate(plughandle_t *handle, const char *osc_url)
+{
+	if(!handle->rolling && osc_url)
+	{
+		handle->rolling = lv2_osc_stream_init(&handle->data.stream, osc_url,
+			&handle->data.driver, handle) == 0;
+		//printf("url: %s %i\n", osc_url, handle->rolling);
+	}
+}
+
+static void
+activate(LV2_Handle instance)
+{
+	plughandle_t *handle = instance;
+
+	_activate(handle, NULL);
+}
+
+static inline void
+_deactivate(plughandle_t *handle)
+{
+	if(handle->rolling)
+	{
+		lv2_osc_stream_deinit(&handle->data.stream);
+		handle->rolling = false;
+	}
+}
+
 static void
 deactivate(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	atomic_store_explicit(&handle->done, true, memory_order_relaxed);
-#if !defined(_WIN32)
-	sem_post(handle->data.sem);
-#endif
-	pthread_join(handle->thread, NULL);
+	_deactivate(handle);
 }
 
 static void
@@ -704,19 +622,80 @@ cleanup(LV2_Handle instance)
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 	varchunk_free(handle->data.to_thread);
-#if !defined(_WIN32)
-	sem_close(handle->data.sem);
-	sem_unlink(handle->data.id);
-#endif
 
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
 }
 
+// non-rt thread
+static LV2_Worker_Status
+_work(LV2_Handle instance,
+	LV2_Worker_Respond_Function respond,
+	LV2_Worker_Respond_Handle target,
+	uint32_t _size,
+	const void *_body)
+{
+	plughandle_t *handle = instance;
+
+	const char *osc_url = NULL;
+
+	size_t size;
+	const uint8_t *body;
+	while((body = varchunk_read_request(handle->data.to_thread, &size)))
+	{
+		LV2_OSC_Reader reader;
+		LV2_OSC_Arg arg;
+		lv2_osc_reader_initialize(&reader, body, size);
+		lv2_osc_reader_arg_begin(&reader, &arg, size);
+
+		if(!strcmp(arg.path, "/eteroj/url"))
+		{
+			osc_url = arg.s;
+
+			_deactivate(handle);
+		}
+
+		varchunk_read_advance(handle->data.to_thread);
+	}
+
+	_activate(handle, osc_url);
+
+	if(handle->rolling)
+		lv2_osc_stream_run(&handle->data.stream);
+
+	return LV2_WORKER_SUCCESS;
+}
+
+// rt-thread
+static LV2_Worker_Status
+_work_response(LV2_Handle instance, uint32_t size, const void *body)
+{
+	// do nothing
+
+	return LV2_WORKER_SUCCESS;
+}
+
+// rt-thread
+static LV2_Worker_Status
+_end_run(LV2_Handle instance)
+{
+	// do nothing
+
+	return LV2_WORKER_SUCCESS;
+}
+
+static const LV2_Worker_Interface work_iface = {
+	.work = _work,
+	.work_response = _work_response,
+	.end_run = _end_run
+};
+
 static const void*
 extension_data(const char* uri)
 {
-	if(!strcmp(uri, LV2_STATE__interface))
+	if(!strcmp(uri, LV2_WORKER__interface))
+		return &work_iface;
+	else if(!strcmp(uri, LV2_STATE__interface))
 		return &state_iface;
 
 	return NULL;
