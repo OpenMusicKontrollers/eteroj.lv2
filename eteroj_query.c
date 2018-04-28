@@ -686,7 +686,7 @@ _message_cb(const char *path, const LV2_Atom_Tuple *body, void *data)
 							}
 							else if(!json_eq(json, item_key, "description"))
 							{
-								size_t len;
+								size_t len = 0;
 								const char *s = json_string(json, item_val, &len);
 
 								char dest [1024];

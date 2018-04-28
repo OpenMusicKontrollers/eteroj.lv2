@@ -636,21 +636,20 @@ _work(LV2_Handle instance,
 	const void *_body)
 {
 	plughandle_t *handle = instance;
-
-	const char *osc_url = NULL;
+	char *osc_url = NULL;
 
 	size_t size;
 	const uint8_t *body;
 	while((body = varchunk_read_request(handle->data.to_thread, &size)))
 	{
 		LV2_OSC_Reader reader;
-		LV2_OSC_Arg arg;
+		LV2_OSC_Arg arg = {0};
 		lv2_osc_reader_initialize(&reader, body, size);
 		lv2_osc_reader_arg_begin(&reader, &arg, size);
 
 		if(!strcmp(arg.path, "/eteroj/url"))
 		{
-			osc_url = arg.s;
+			osc_url = strdup(arg.s);
 
 			_deactivate(handle);
 		}
@@ -659,6 +658,9 @@ _work(LV2_Handle instance,
 	}
 
 	_activate(handle, osc_url);
+
+	if(osc_url)
+		free(osc_url);
 
 	if(handle->rolling)
 		lv2_osc_stream_run(&handle->data.stream);
