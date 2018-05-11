@@ -115,6 +115,7 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.property = ETEROJ_URI"#ninja_synchronous",
 		.offset = offsetof(plugstate_t, synchronous),
 		.type = LV2_ATOM__Bool
+		//FIXME flush ringbuffers when changing from asynchronous to synchronous
 	}
 };
 
@@ -222,8 +223,10 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 	if(itr->type != forge->Chunk)
 		return;
 
+	memcpy(handle->buf, LV2_ATOM_BODY(itr), itr->size);
+
 	const LV2_Atom *atom = netatom_deserialize(handle->netatom,
-		LV2_ATOM_BODY(itr), itr->size);
+		handle->buf, itr->size);
 	if(atom)
 	{
 		if(handle->ref)
@@ -231,76 +234,6 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 		if(handle->ref)
 			handle->ref = lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
 	}
-}
-
-static void
-run(LV2_Handle instance, uint32_t nsamples)
-{
-	plughandle_t *handle = (plughandle_t *)instance;
-
-	// prepare osc atom forge
-	const uint32_t capacity = handle->event_out->atom.size;
-
-	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
-
-	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
-	{
-		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
-
-		props_advance(&handle->props, &handle->forge, ev->time.frames, obj, &handle->ref);
-	}
-
-	if(handle->state.synchronous)
-	{
-		//FIXME
-	}
-	else // asynchronous
-	{
-		// move input events to worker thread
-		if(handle->event_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
-		{
-			const size_t size = lv2_atom_total_size(&handle->event_in->atom);
-			LV2_Atom_Sequence *seq;
-			if((seq = varchunk_write_request(handle->to_worker, size)))
-			{
-				memcpy(seq, handle->event_in, size);
-				varchunk_write_advance(handle->to_worker, size);
-
-				const int32_t dummy;
-				handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
-			}
-		}
-
-		// move output events from worker thread
-		size_t size;
-		const LV2_Atom_Sequence *seq;
-		if((seq = varchunk_read_request(handle->from_worker, &size)))
-		{
-			if(size <= capacity)
-				memcpy(handle->event_out, seq, size);
-			varchunk_read_advance(handle->from_worker);
-		}
-		else
-		{
-			lv2_atom_sequence_clear(handle->event_out);
-		}
-	}
-}
-
-static void
-cleanup(LV2_Handle instance)
-{
-	plughandle_t *handle = (plughandle_t *)instance;
-
-	if(handle->ser.buf)
-		free(handle->ser.buf);
-	if(handle->to_worker)
-		varchunk_free(handle->to_worker);
-	if(handle->from_worker)
-		varchunk_free(handle->from_worker);
-	netatom_free(handle->netatom);
-	munlock(handle, sizeof(plughandle_t));
-	free(handle);
 }
 
 static void
@@ -333,6 +266,85 @@ _convert_seq(plughandle_t *handle, LV2_Atom_Forge *forge, const LV2_Atom_Sequenc
 			}
 		}
 	}
+}
+
+static void
+run(LV2_Handle instance, uint32_t nsamples)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	// prepare osc atom forge
+	const uint32_t capacity = handle->event_out->atom.size;
+	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
+	LV2_Atom_Forge_Frame frame;
+	handle->ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+
+	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
+
+	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
+	{
+		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
+
+		props_advance(&handle->props, &handle->forge, 0, obj, &handle->ref); //NOTE 0!
+	}
+
+	if(handle->state.synchronous)
+	{
+		_convert_seq(handle, &handle->forge, handle->event_in);
+	}
+	else // asynchronous
+	{
+		// move input events to worker thread
+		if(handle->event_in->atom.size > sizeof(LV2_Atom_Sequence_Body))
+		{
+			const size_t size = lv2_atom_total_size(&handle->event_in->atom);
+			LV2_Atom_Sequence *seq;
+			if((seq = varchunk_write_request(handle->to_worker, size)))
+			{
+				memcpy(seq, handle->event_in, size);
+				varchunk_write_advance(handle->to_worker, size);
+
+				const int32_t dummy;
+				handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
+			}
+		}
+
+		// move output events from worker thread
+		size_t size;
+		const LV2_Atom_Sequence *seq;
+		if((seq = varchunk_read_request(handle->from_worker, &size)))
+		{
+			LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+			{
+				if(handle->ref)
+					handle->ref = lv2_atom_forge_frame_time(&handle->forge, ev->time.frames);
+				if(handle->ref)
+					handle->ref = lv2_atom_forge_write(&handle->forge, &ev->body, lv2_atom_total_size(&ev->body));
+			}
+			varchunk_read_advance(handle->from_worker);
+		}
+	}
+
+	if(handle->ref)
+		lv2_atom_forge_pop(&handle->forge, &frame);
+	else
+		lv2_atom_sequence_clear(handle->event_out);
+}
+
+static void
+cleanup(LV2_Handle instance)
+{
+	plughandle_t *handle = (plughandle_t *)instance;
+
+	if(handle->ser.buf)
+		free(handle->ser.buf);
+	if(handle->to_worker)
+		varchunk_free(handle->to_worker);
+	if(handle->from_worker)
+		varchunk_free(handle->from_worker);
+	netatom_free(handle->netatom);
+	munlock(handle, sizeof(plughandle_t));
+	free(handle);
 }
 
 // non-rt thread
