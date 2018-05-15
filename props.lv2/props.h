@@ -125,7 +125,7 @@ struct _props_t {
 
 #define PROPS_T(PROPS, MAX_NIMPLS) \
 	props_t (PROPS); \
-	props_impl_t _impls [(MAX_NIMPLS)];
+	props_impl_t _impls [(MAX_NIMPLS)]
 
 // rt-safe
 static inline int
@@ -176,13 +176,11 @@ props_restore(props_t *props, LV2_State_Retrieve_Function retrieve,
  *****************************************************************************/
 
 // enumerations
-typedef enum _props_state_t props_state_t;
-
-enum _props_state_t {
+typedef enum _props_state_t {
 	PROP_STATE_NONE    = 0,
 	PROP_STATE_LOCK    = 1,
 	PROP_STATE_RESTORE = 2
-};
+} props_state_t;
 
 static inline void
 _props_impl_spin_lock(props_impl_t *impl, int from, int to)
@@ -434,8 +432,8 @@ _props_impl_init(props_t *props, props_impl_t *impl, const props_def_t *def,
 	impl->property = property;
 	impl->access = access;
 	impl->def = def;
-	impl->value.body = value_base + def->offset;
-	impl->stash.body = stash_base + def->offset;
+	impl->value.body = (uint8_t *)value_base + def->offset;
+	impl->stash.body = (uint8_t *)stash_base + def->offset;
 
 	uint32_t size;
 	if(  (type == props->urid.atom_int)
@@ -617,7 +615,6 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			for(unsigned i = 0; i < props->nimpls; i++)
 			{
 				props_impl_t *impl = &props->impls[i];
-				const props_def_t *def = impl->def;
 
 				if(*ref)
 					*ref = _props_patch_set(props, forge, frames, impl, sequence_num);
@@ -632,8 +629,6 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			if(impl)
 			{
 				*ref = _props_patch_set(props, forge, frames, impl, sequence_num);
-
-				const props_def_t *def = impl->def;
 
 				return 1;
 			}
@@ -859,8 +854,8 @@ props_save(props_t *props, LV2_State_Store_Function store,
 			if( map_path && (impl->type == props->urid.atom_path) )
 			{
 				const char *path = strstr(body, "file://")
-					? body + 7 // skip "file://"
-					: body;
+					? (char *)body + 7 // skip "file://"
+					: (char *)body;
 				char *abstract = map_path->abstract_path(map_path->handle, path);
 				if(abstract)
 				{
@@ -884,7 +879,8 @@ props_save(props_t *props, LV2_State_Store_Function store,
 
 static inline LV2_State_Status
 props_restore(props_t *props, LV2_State_Retrieve_Function retrieve,
-	LV2_State_Handle state, uint32_t flags, const LV2_Feature *const *features)
+	LV2_State_Handle state, uint32_t flags __attribute__((unused)),
+	const LV2_Feature *const *features)
 {
 	const LV2_State_Map_Path *map_path = NULL;
 

@@ -22,7 +22,7 @@
 # Orbit Looper
 props:test
 	a lv2:Plugin ;
-	lv2:minorVersion @PROPS_MINOR_VERSION@ ;
-	lv2:microVersion @PROPS_MICRO_VERSION@ ;
-	lv2:binary <props@LIB_EXT@> ;
+	lv2:minorVersion @MINOR_VERSION@ ;
+	lv2:microVersion @MICRO_VERSION@ ;
+	lv2:binary <props@MODULE_SUFFIX@> ;
 	rdfs:seeAlso <props.ttl> .
