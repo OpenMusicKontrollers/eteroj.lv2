@@ -13,17 +13,15 @@ Get more information at: [http://open-music-kontrollers.ch/lv2/eteroj](http://op
 ### Dependencies
 
 * [LV2](http://lv2plug.in) (LV2 Plugin Standard)
-* [libuv](http://docs.libuv.org/) (Lightweight event library)
 
 ### Build / install
 
-	git clone https://github.com/OpenMusicKontrollers/eteroj.lv2.git
+	git clone https://git.open-music-kontrollers.ch/eteroj.lv2
 	cd eteroj.lv2
-	mkdir build
+	meson build
 	cd build
-	cmake -DCMAKE_BUILD_TYPE="Release" ..
-	make
-	sudo make install
+	ninja -j4
+	sudo ninja install
 
 ### License
 

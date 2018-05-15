@@ -388,7 +388,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	char *tmp = make_path->path(make_path->handle, DEFAULT_FILE_NAME);
 	if(tmp)
 	{
-		strncpy(handle->state.path, tmp, MAX_STRLEN);
+		strncpy(handle->state.path, tmp, MAX_STRLEN-1);
 		free(tmp);
 	
 		if(access(handle->state.path, F_OK)) // does not yet exist
