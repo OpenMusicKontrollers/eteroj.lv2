@@ -40,8 +40,7 @@ c_args = ['-fvisibility=hidden',
 	'-ffast-math',
 	'-Wno-unused-variable',
 	'-Wno-unused-function',
-	'-Wno-misleading-indentation',
-	'-Wno-stringop-overflow']
+	'-Wno-misleading-indentation']
 
 dsp_srcs = ['eteroj.c',
 	'eteroj_cloak.c',
