@@ -54,13 +54,13 @@ dsp_srcs = ['eteroj.c',
 dsp_srcs += join_paths('jsmn', 'jsmn.c')
 dsp_srcs += join_paths('tlsf-3.0', 'tlsf.c')
 
-if host_machine.system() == 'linux'
-	# nothing
-elif host_machine.system() == 'windows'
+if host_machine.system() == 'windows'
 	dsp_deps += cc.find_library('ws2_32')
 	dsp_deps += cc.find_library('psapi')
 	dsp_deps += cc.find_library('iphlpapi')
 elif host_machine.system() == 'darwin'
+	# nothing
+else
 	# nothing
 endif
 
