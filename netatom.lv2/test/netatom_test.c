@@ -16,6 +16,7 @@
  */
 
 #include <time.h>
+#include <inttypes.h>
 #include <sratom/sratom.h>
 
 #define NETATOM_IMPLEMENTATION
@@ -25,14 +26,14 @@
 #define MAX_BUF 4092
 
 typedef struct _urid_t urid_t;
-typedef struct _handle_t handle_t;
+typedef struct _store_t store_t;
 
 struct _urid_t {
 	LV2_URID urid;
 	char *uri;
 };
 
-struct _handle_t {
+struct _store_t {
 	urid_t urids [MAX_URIDS];
 	LV2_URID urid;
 };
@@ -40,7 +41,7 @@ struct _handle_t {
 static LV2_URID
 _map(LV2_URID_Map_Handle instance, const char *uri)
 {
-	handle_t *handle = instance;
+	store_t *handle = instance;
 
 	urid_t *itm;
 	for(itm=handle->urids; itm->urid; itm++)
@@ -61,7 +62,7 @@ _map(LV2_URID_Map_Handle instance, const char *uri)
 static const char *
 _unmap(LV2_URID_Unmap_Handle instance, LV2_URID urid)
 {
-	handle_t *handle = instance;
+	store_t *handle = instance;
 
 	for(urid_t *itm=handle->urids; itm->urid; itm++)
 	{
@@ -74,7 +75,7 @@ _unmap(LV2_URID_Unmap_Handle instance, LV2_URID urid)
 }
 
 static void
-_freemap(handle_t *handle)
+_freemap(store_t *handle)
 {
 	for(urid_t *itm = handle->urids; itm->urid; itm++)
 		free(itm->uri);
@@ -92,7 +93,7 @@ _netatom_test(LV2_URID_Map *map, LV2_URID_Unmap *unmap, bool swap,
 	{
 		memcpy(buf, atom, lv2_atom_total_size(atom));
 
-		size_t size_tx;
+		size_t size_tx = 0;
 		uint8_t *buf_tx = netatom_serialize(netatom, (LV2_Atom *)buf, MAX_BUF, &size_tx);
 		assert(buf_tx);
 
@@ -100,8 +101,9 @@ _netatom_test(LV2_URID_Map *map, LV2_URID_Unmap *unmap, bool swap,
 		{
 			fwrite(buf_tx, size_tx, 1, stdout);
 
-			fprintf(stderr, "%u, %zu, %f\n", lv2_atom_total_size(atom), size_tx,
-					(float)size_tx / lv2_atom_total_size(atom));
+			const uint32_t tot_size = lv2_atom_total_size(atom);
+			fprintf(stderr, "%"PRIu32", %"PRIuPTR", %lf\n", tot_size, size_tx,
+					(double)size_tx / lv2_atom_total_size(atom));
 		}
 
 		const LV2_Atom *atom_rx = netatom_deserialize(netatom, buf_tx, size_tx);
@@ -152,7 +154,7 @@ _sratom_test(LV2_URID_Map *map, LV2_URID_Unmap *unmap, bool pretty,
 int
 main(int argc, char **argv)
 {
-	static handle_t handle;
+	static store_t handle;
 
 	if(argc < 2)
 		return -1;
@@ -263,16 +265,22 @@ main(int argc, char **argv)
 		map.map(map.handle, tmp);
 	}
 
+#if !defined(__APPLE__) && !defined(_WIN32)
 	struct timespec t0, t1, t2;
 	clock_gettime(CLOCK_MONOTONIC, &t0);
+#endif
 	_netatom_test(&map, &unmap, true, &un.atom, iterations);
+#if !defined(__APPLE__) && !defined(_WIN32)
 	clock_gettime(CLOCK_MONOTONIC, &t1);
+#endif
 	_sratom_test(&map, &unmap, false, &un.atom, iterations);
+#if !defined(__APPLE__) && !defined(_WIN32)
 	clock_gettime(CLOCK_MONOTONIC, &t2);
 
 	const double d1 = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) * 1e-9;
 	const double d2 = (t2.tv_sec - t1.tv_sec) + (t2.tv_nsec - t1.tv_nsec) * 1e-9;
 	fprintf(stderr, "%lf s, %lf s, x %lf\n", d1, d2, d2/d1);
+#endif
 
 	_freemap(&handle);
 
