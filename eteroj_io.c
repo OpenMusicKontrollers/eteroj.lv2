@@ -29,21 +29,12 @@
 
 #define POOL_SIZE 0x800000 // 8M
 #define BUF_SIZE 0x100000 // 1M
-#define MAX_NPROPS 3
+#define MAX_NPROPS 2
 #define STR_LEN 512
 
-typedef enum _plugenum_t plugenum_t;
 typedef struct _plugstate_t plugstate_t;
 typedef struct _list_t list_t;
 typedef struct _plughandle_t plughandle_t;
-
-enum _plugenum_t {
-	STATUS_IDLE					= 0,
-	STATUS_READY				= 1,
-	STATUS_TIMEDOUT			= 2,
-	STATUS_ERRORED			= 3,
-	STATUS_CONNECTED		= 4
-};
 
 struct _list_t {
 	list_t *next;
@@ -55,7 +46,7 @@ struct _list_t {
 
 struct _plugstate_t {
 	char osc_url [STR_LEN];
-	char osc_status [STR_LEN];
+	int32_t osc_connected;
 	char osc_error [STR_LEN];
 };
 
@@ -64,11 +55,7 @@ struct _plughandle_t {
 	LV2_URID_Unmap *unmap;
 	LV2_Worker_Schedule *sched;
 	struct {
-		LV2_URID state_default;
-		LV2_URID subject;
-
-		LV2_URID eteroj_stat;
-		LV2_URID eteroj_err;
+		LV2_URID eteroj_connected;
 	} uris;
 
 	PROPS_T(props, MAX_NPROPS);
@@ -100,14 +87,6 @@ struct _plughandle_t {
 		varchunk_t *to_worker;
 		varchunk_t *to_thread;
 	} data;
-};
-
-static const char *status [] = {
-	[STATUS_IDLE] = "idle",
-	[STATUS_READY] = "ready",
-	[STATUS_TIMEDOUT] = "timedout",
-	[STATUS_ERRORED] = "errored",
-	[STATUS_CONNECTED] = "connected"
 };
 
 static inline list_t *
@@ -231,53 +210,23 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.event_cb = _intercept
 	},
 	{
-		.property = ETEROJ_STAT_URI,
-		.offset = offsetof(plugstate_t, osc_status),
+		.property = ETEROJ_CONNECTED_URI,
+		.offset = offsetof(plugstate_t, osc_connected),
 		.access = LV2_PATCH__readable,
-		.type = LV2_ATOM__String,
-		.max_size = STR_LEN
-	},
-	{
-		.property = ETEROJ_ERR_URI,
-		.offset = offsetof(plugstate_t, osc_error),
-		.access = LV2_PATCH__readable,
-		.type = LV2_ATOM__String,
-		.max_size = STR_LEN,
+		.type = LV2_ATOM__Bool,
 	}
 };
-
-static inline void
-_set_status(plughandle_t *handle, int stat)
-{
-	props_impl_t *impl = _props_bsearch(&handle->props, handle->uris.eteroj_stat);
-	if(impl)
-	{
-		const char *str = status[stat];
-		_props_impl_set(&handle->props, impl, handle->forge.String, strlen(str) + 1, str);
-	}
-}
-
-static inline void
-_set_error(plughandle_t *handle, const char *err)
-{
-	props_impl_t *impl = _props_bsearch(&handle->props, handle->uris.eteroj_err);
-	if(impl)
-	{
-		_props_impl_set(&handle->props, impl, handle->forge.String, strlen(err) + 1, err);
-	}
-}
 
 static LV2_Handle
 instantiate(const LV2_Descriptor* descriptor, double rate,
 	const char *bundle_path, const LV2_Feature *const *features)
 {
-	int i;
 	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
 	if(!handle)
 		return NULL;
 	mlock(handle, sizeof(plughandle_t));
 
-	for(i=0; features[i]; i++)
+	for(unsigned i=0; features[i]; i++)
 	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
 			handle->map = features[i]->data;
@@ -335,11 +284,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->uris.eteroj_stat = props_map(&handle->props, ETEROJ_STAT_URI);
-	handle->uris.eteroj_err = props_map(&handle->props, ETEROJ_ERR_URI);
-
-	_set_status(handle, STATUS_IDLE);
-	_set_error(handle, "");
+	handle->uris.eteroj_connected = props_map(&handle->props, ETEROJ_CONNECTED_URI);
 
 	return handle;
 }
@@ -365,61 +310,11 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 static inline void
 _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 {
-	LV2_OSC_Reader reader;
-	LV2_OSC_Arg arg;
-	lv2_osc_reader_initialize(&reader, buf, size);
-	lv2_osc_reader_arg_begin(&reader, &arg, size);
-
-#if 0
-	if(!strcmp(arg.path, "/stream/resolve"))
-	{
-		_set_status(handle, STATUS_READY);
-		_set_error(handle, "");
-
-		handle->status_updated = true;
-	}
-	else if(!strcmp(arg.path, "/stream/timeout"))
-	{
-		_set_status(handle, STATUS_TIMEDOUT);
-		_set_error(handle, "");
-
-		handle->status_updated = true;
-	}
-	else if(!strcmp(arg.path, "/stream/error"))
-	{
-		const char *where = arg.s;
-		const char *what = lv2_osc_reader_arg_next(&reader, &arg)->s;
-
-		char err [STR_LEN];
-		snprintf(err, STR_LEN, "%s (%s)\n", where, what);
-		_set_status(handle, STATUS_ERRORED);
-		_set_error(handle, err);
-
-		handle->status_updated = true;
-	}
-	else if(!strcmp(arg.path, "/stream/connect"))
-	{
-		_set_status(handle, STATUS_CONNECTED);
-		_set_error(handle, "");
-
-		handle->status_updated = true;
-	}
-	else if(!strcmp(arg.path, "/stream/disconnect"))
-	{
-		_set_status(handle, STATUS_READY);
-		_set_error(handle, "");
-
-		handle->status_updated = true;
-	}
-	else // general message
-#endif
-	{
-		if(handle->ref)
-			handle->ref = lv2_atom_forge_frame_time(&handle->forge, frames);
-		if(handle->ref)
-			handle->ref = lv2_osc_forge_packet(&handle->forge, &handle->osc_urid, handle->map,
-				buf, size);
-	}
+	if(handle->ref)
+		handle->ref = lv2_atom_forge_frame_time(&handle->forge, frames);
+	if(handle->ref)
+		handle->ref = lv2_osc_forge_packet(&handle->forge, &handle->osc_urid, handle->map,
+			buf, size);
 }
 
 static inline void 
@@ -512,8 +407,8 @@ run(LV2_Handle instance, uint32_t nsamples)
 	}
 
 	// wake worker once per period
-	const uint32_t dummy = 0;
-	handle->sched->schedule_work(handle->sched->handle, sizeof(dummy), &dummy);
+	const int32_t dummy = 0;
+	handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
 
 	// reschedule scheduled bundles
 	if(handle->osc_sched)
@@ -564,8 +459,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 	if(handle->status_updated)
 	{
-		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_stat, &handle->ref);
-		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_err, &handle->ref);
+		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_connected, &handle->ref);
 
 		handle->status_updated = false;
 	}
@@ -660,10 +554,17 @@ _work(LV2_Handle instance,
 	_activate(handle, osc_url);
 
 	if(osc_url)
+	{
 		free(osc_url);
+	}
 
 	if(handle->rolling)
-		lv2_osc_stream_run(&handle->data.stream);
+	{
+		const LV2_OSC_Enum ev = lv2_osc_stream_run(&handle->data.stream);
+		const int32_t connected = (ev & LV2_OSC_CONN) ? 1 : 0;
+
+		respond(target, sizeof(int32_t), &connected); // return connection status
+	}
 
 	return LV2_WORKER_SUCCESS;
 }
@@ -672,7 +573,18 @@ _work(LV2_Handle instance,
 static LV2_Worker_Status
 _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
-	// do nothing
+	plughandle_t *handle = instance;
+
+	if(size == sizeof(int32_t))
+	{
+		const int32_t *connected = body;
+
+		if(handle->state.osc_connected != *connected)
+		{
+			handle->state.osc_connected = *connected;
+			handle->status_updated = true;
+		}
+	}
 
 	return LV2_WORKER_SUCCESS;
 }

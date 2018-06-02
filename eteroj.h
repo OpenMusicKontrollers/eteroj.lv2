@@ -44,8 +44,7 @@
 
 #define ETEROJ_EVENT_URI							ETEROJ_URI"#event"
 #define ETEROJ_URL_URI								ETEROJ_URI"#url"
-#define ETEROJ_STAT_URI								ETEROJ_URI"#status"
-#define ETEROJ_ERR_URI								ETEROJ_URI"#error"
+#define ETEROJ_CONNECTED_URI					ETEROJ_URI"#connected"
 
 #define ETEROJ_DISK_RECORD_URI				ETEROJ_URI"#disk_record"
 #define ETEROJ_DISK_PATH_URI					ETEROJ_URI"#disk_path"
