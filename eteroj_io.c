@@ -29,8 +29,8 @@
 
 #define POOL_SIZE 0x800000 // 8M
 #define BUF_SIZE 0x100000 // 1M
-#define MAX_NPROPS 2
-#define STR_LEN 512
+#define MAX_NPROPS 3
+#define STR_LEN 128
 
 typedef struct _plugstate_t plugstate_t;
 typedef struct _list_t list_t;
@@ -41,13 +41,13 @@ struct _list_t {
 	double frames;
 
 	size_t size;
-	uint8_t buf [0];
+	uint8_t buf [];
 };
 
 struct _plugstate_t {
 	char osc_url [STR_LEN];
-	int32_t osc_connected;
 	char osc_error [STR_LEN];
+	int32_t osc_connected;
 };
 
 struct _plughandle_t {
@@ -56,6 +56,7 @@ struct _plughandle_t {
 	LV2_Worker_Schedule *sched;
 	struct {
 		LV2_URID eteroj_connected;
+		LV2_URID eteroj_error;
 	} uris;
 
 	PROPS_T(props, MAX_NPROPS);
@@ -210,6 +211,13 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.event_cb = _intercept
 	},
 	{
+		.property = ETEROJ_ERROR_URI,
+		.offset = offsetof(plugstate_t, osc_error),
+		.access = LV2_PATCH__readable,
+		.type = LV2_ATOM__String,
+		.max_size = STR_LEN
+	},
+	{
 		.property = ETEROJ_CONNECTED_URI,
 		.offset = offsetof(plugstate_t, osc_connected),
 		.access = LV2_PATCH__readable,
@@ -285,6 +293,7 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 	}
 
 	handle->uris.eteroj_connected = props_map(&handle->props, ETEROJ_CONNECTED_URI);
+	handle->uris.eteroj_error = props_map(&handle->props, ETEROJ_ERROR_URI);
 
 	return handle;
 }
@@ -460,6 +469,7 @@ run(LV2_Handle instance, uint32_t nsamples)
 	if(handle->status_updated)
 	{
 		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_connected, &handle->ref);
+		props_set(&handle->props, forge, nsamples-1, handle->uris.eteroj_error, &handle->ref);
 
 		handle->status_updated = false;
 	}
@@ -471,13 +481,58 @@ run(LV2_Handle instance, uint32_t nsamples)
 }
 
 static inline void
+_handle_enum(plughandle_t *handle, LV2_OSC_Enum ev)
+{
+	const char *err = "";
+
+	if(ev & LV2_OSC_ERR)
+	{
+		char buf [STR_LEN] = { '\0' };
+		err = strerror_r(ev & LV2_OSC_ERR, buf, sizeof(buf));
+
+		if(!err)
+			err = "Unknown";
+
+		if(handle->log)
+			lv2_log_trace(&handle->logger, "%s\n", err);
+	}
+
+	if(strcmp(handle->state.osc_error, err))
+	{
+		strncpy(handle->state.osc_error, err, STR_LEN-1);
+
+		props_impl_t *impl = _props_bsearch(&handle->props, handle->uris.eteroj_error);
+		if(impl)
+		{
+			_props_impl_set(&handle->props, impl, handle->forge.String, strlen(err), err);
+		}
+
+		handle->status_updated = true;
+	}
+
+	const bool connected = (ev & LV2_OSC_CONN) ? true : false;
+
+	if(handle->state.osc_connected != connected)
+	{
+		handle->state.osc_connected = connected;
+		handle->status_updated = true;
+	}
+}
+
+static inline void
 _activate(plughandle_t *handle, const char *osc_url)
 {
 	if(!handle->rolling && osc_url)
 	{
-		handle->rolling = lv2_osc_stream_init(&handle->data.stream, osc_url,
-			&handle->data.driver, handle) == 0;
-		//printf("url: %s %i\n", osc_url, handle->rolling);
+		const LV2_OSC_Enum ev = lv2_osc_stream_init(&handle->data.stream, osc_url,
+			&handle->data.driver, handle);
+
+		_handle_enum(handle, ev);
+
+		if( (ev & LV2_OSC_ERR) == LV2_OSC_NONE)
+		{
+			handle->rolling = true;
+		}
 	}
 }
 
@@ -561,9 +616,8 @@ _work(LV2_Handle instance,
 	if(handle->rolling)
 	{
 		const LV2_OSC_Enum ev = lv2_osc_stream_run(&handle->data.stream);
-		const int32_t connected = (ev & LV2_OSC_CONN) ? 1 : 0;
 
-		respond(target, sizeof(int32_t), &connected); // return connection status
+		respond(target, sizeof(LV2_OSC_Enum), &ev);
 	}
 
 	return LV2_WORKER_SUCCESS;
@@ -575,15 +629,11 @@ _work_response(LV2_Handle instance, uint32_t size, const void *body)
 {
 	plughandle_t *handle = instance;
 
-	if(size == sizeof(int32_t))
+	if(size == sizeof(LV2_OSC_Enum))
 	{
-		const int32_t *connected = body;
+		const LV2_OSC_Enum *ev = body;
 
-		if(handle->state.osc_connected != *connected)
-		{
-			handle->state.osc_connected = *connected;
-			handle->status_updated = true;
-		}
+		_handle_enum(handle, *ev);
 	}
 
 	return LV2_WORKER_SUCCESS;

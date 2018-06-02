@@ -67,6 +67,11 @@ eteroj:connected
 	rdfs:label "Connected" ;
 	rdfs:comment "shows connection status" ;
 	rdfs:range atom:Bool .
+eteroj:error
+	a lv2:Parameter ;
+	rdfs:label "Error" ;
+	rdfs:comment "shows connection errors" ;
+	rdfs:range atom:String .
 
 # IO Plugin
 eteroj:io
@@ -109,7 +114,8 @@ eteroj:io
 	patch:writable
 		eteroj:url ;
 	patch:readable
-		eteroj:connected ;
+		eteroj:connected ,
+		eteroj:error ;
 
 	# default state
 	state:state [
