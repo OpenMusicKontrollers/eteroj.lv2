@@ -107,7 +107,9 @@ typedef enum _LV2_OSC_Enum {
 
 	LV2_OSC_SEND = 0x800000,
 	LV2_OSC_RECV = 0x400000,
-	LV2_OSC_CONN = 0x200000
+	LV2_OSC_CONN = 0x200000,
+
+	LV2_OSC_ERR  = 0x00ffff
 } LV2_OSC_Enum;
 
 static const char *udp_prefix = "osc.udp://";
@@ -119,13 +121,13 @@ static const char *ser_prefix = "osc.serial://";
 
 
 static int
-_lv2_set_interface_attribs(int fd, int speed)
+_lv2_osc_stream_interface_attribs(int fd, int speed)
 {
 	struct termios tty;
 
 	if(tcgetattr(fd, &tty) < 0)
 	{
-		return errno;
+		return -1;
 	}
 
 	cfsetospeed(&tty, (speed_t)speed);
@@ -149,22 +151,25 @@ _lv2_set_interface_attribs(int fd, int speed)
 
 	if(tcsetattr(fd, TCSANOW, &tty) != 0)
 	{
-		return errno;
+		return -1;
 	}
 
 	return 0;
 }
 
+#define LV2_OSC_STREAM_ERRNO(EV, ERRNO) ( (EV & (~LV2_OSC_ERR)) | (ERRNO) )
+
 static int
 lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 	const LV2_OSC_Driver *driv, void *data)
 {
+	LV2_OSC_Enum ev = LV2_OSC_NONE;
 	memset(stream, 0x0, sizeof(LV2_OSC_Stream));
 
 	char *dup = strdup(url);
 	if(!dup)
 	{
-		fprintf(stderr, "%s: out-of-memory\n", __func__);
+		ev = LV2_OSC_STREAM_ERRNO(ev, ENOMEM);
 		goto fail;
 	}
 
@@ -211,13 +216,13 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 	}
 	else
 	{
-		fprintf(stderr, "%s: invalid protocol\n", __func__);
+		ev = LV2_OSC_STREAM_ERRNO(ev, ENOPROTOOPT);
 		goto fail;
 	}
 
 	if(ptr[0] == '\0')
 	{
-		fprintf(stderr, "%s: URI is incomplete\n", __func__);
+		ev = LV2_OSC_STREAM_ERRNO(ev, EDESTADDRREQ);
 		goto fail;
 	}
 
@@ -229,19 +234,19 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 		stream->sock = open(ptr, O_RDWR | O_NOCTTY | O_NDELAY);
 		if(stream->sock < 0)
 		{
-			fprintf(stderr, "%s: open failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
 		if(fcntl(stream->sock, F_SETFL, FNDELAY) == -1) //FIXME
 		{
-			fprintf(stderr, "%s: fcntl failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
-		if(_lv2_set_interface_attribs(stream->sock, B115200) < 0)
+		if(_lv2_osc_stream_interface_attribs(stream->sock, B115200) == -1)
 		{
-			fprintf(stderr, "%s: setting attributes failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
@@ -267,7 +272,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 		{
 			if(stream->socket_family != AF_INET6)
 			{
-				fprintf(stderr, "%s: no IPv6 interface delimiter expected here\n", __func__);
+				ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 				goto fail;
 			}
 
@@ -282,7 +287,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 		{
 			if(stream->socket_family != AF_INET6)
 			{
-				fprintf(stderr, "%s: no closing IPv6 bracket expected here\n", __func__);
+				ev = LV2_OSC_STREAM_ERRNO(ev, EDESTADDRREQ);
 				goto fail;
 			}
 
@@ -295,7 +300,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 		ptr = strchr(ptr, ':');
 		if(!ptr)
 		{
-			fprintf(stderr, "%s: pre-service colon expected\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, EDESTADDRREQ);
 			goto fail;
 		}
 
@@ -314,13 +319,13 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 
 		if(stream->sock < 0)
 		{
-			fprintf(stderr, "%s: socket failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
 		if(fcntl(stream->sock, F_SETFL, O_NONBLOCK) == -1)
 		{
-			fprintf(stderr, "%s: fcntl failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
@@ -330,14 +335,14 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 		if(setsockopt(stream->sock, SOL_SOCKET,
 			SO_SNDBUF, &sendbuff, sizeof(int))== -1)
 		{
-			fprintf(stderr, "%s: setsockopt failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
 		if(setsockopt(stream->sock, SOL_SOCKET,
 			SO_RCVBUF, &recvbuff, sizeof(int))== -1)
 		{
-			fprintf(stderr, "%s: setsockopt failed\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 			goto fail;
 		}
 
@@ -355,12 +360,12 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				struct addrinfo *res;
 				if(getaddrinfo(node, service, &hints, &res) != 0)
 				{
-					fprintf(stderr, "%s: getaddrinfo failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 				if(res->ai_addrlen != sizeof(stream->peer.in4))
 				{
-					fprintf(stderr, "%s: IPv4 address expected\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 					goto fail;
 				}
 
@@ -372,7 +377,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 
 				if(bind(stream->sock, &stream->self.in, stream->self.len) != 0)
 				{
-					fprintf(stderr, "%s: bind failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 			}
@@ -385,7 +390,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 
 				if(bind(stream->sock, &stream->self.in, stream->self.len) != 0)
 				{
-					fprintf(stderr, "%s: bind failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
@@ -399,12 +404,12 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				struct addrinfo *res;
 				if(getaddrinfo(node, service, &hints, &res) != 0)
 				{
-					fprintf(stderr, "%s: getaddrinfo failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 				if(res->ai_addrlen != sizeof(stream->peer.in4))
 				{
-					fprintf(stderr, "%s: IPv4 address failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 					goto fail;
 				}
 
@@ -421,7 +426,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				if(setsockopt(stream->sock, SOL_SOCKET, SO_BROADCAST,
 					&broadcast, sizeof(broadcast)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
@@ -434,14 +439,14 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				if(setsockopt(stream->sock, stream->protocol,
 					TCP_NODELAY, &flag, sizeof(int)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
 				if(setsockopt(stream->sock, SOL_SOCKET,
 					SO_KEEPALIVE, &flag, sizeof(int)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
@@ -449,7 +454,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				{
 					if(listen(stream->sock, 1) != 0)
 					{
-						fprintf(stderr, "%s: listen failed\n", __func__);
+						ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 						goto fail;
 					}
 				}
@@ -463,7 +468,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 			}
 			else
 			{
-				fprintf(stderr, "%s: invalid socket type\n", __func__);
+				ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 				goto fail;
 			}
 		}
@@ -481,12 +486,12 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				struct addrinfo *res;
 				if(getaddrinfo(node, service, &hints, &res) != 0)
 				{
-					fprintf(stderr, "%s: getaddrinfo failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 				if(res->ai_addrlen != sizeof(stream->peer.in6))
 				{
-					fprintf(stderr, "%s: IPv6 address expected\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 					goto fail;
 				}
 
@@ -502,7 +507,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 
 				if(bind(stream->sock, &stream->self.in, stream->self.len) != 0)
 				{
-					fprintf(stderr, "%s: bind failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 			}
@@ -519,7 +524,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 
 				if(bind(stream->sock, &stream->self.in, stream->self.len) != 0)
 				{
-					fprintf(stderr, "%s: bind failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
@@ -533,12 +538,12 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				struct addrinfo *res;
 				if(getaddrinfo(node, service, &hints, &res) != 0)
 				{
-					fprintf(stderr, "%s: getaddrinfo failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 				if(res->ai_addrlen != sizeof(stream->peer.in6))
 				{
-					fprintf(stderr, "%s: IPv6 address expected\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 					goto fail;
 				}
 				stream->peer.len = res->ai_addrlen;
@@ -562,14 +567,14 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				if(setsockopt(stream->sock, stream->protocol,
 					TCP_NODELAY, &flag, sizeof(int)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
 				if(setsockopt(stream->sock, SOL_SOCKET,
 					SO_KEEPALIVE, &flag, sizeof(int)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					goto fail;
 				}
 
@@ -577,7 +582,7 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 				{
 					if(listen(stream->sock, 1) != 0)
 					{
-						fprintf(stderr, "%s: listen failed\n", __func__);
+						ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 						goto fail;
 					}
 				}
@@ -591,20 +596,20 @@ lv2_osc_stream_init(LV2_OSC_Stream *stream, const char *url,
 			}
 			else
 			{
-				fprintf(stderr, "%s: invalid socket type\n", __func__);
+				ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 				goto fail;
 			}
 		}
 		else
 		{
-			fprintf(stderr, "%s: invalid socket family\n", __func__);
+			ev = LV2_OSC_STREAM_ERRNO(ev, EPROTOTYPE);
 			goto fail;
 		}
 	}
 
 	free(dup);
 
-	return 0;
+	return ev;
 
 fail:
 	if(dup)
@@ -618,7 +623,7 @@ fail:
 		stream->sock = -1;
 	}
 
-	return -1;
+	return ev;
 }
 
 #define SLIP_END					0300	// 0xC0, 192, indicates end of packet
@@ -747,12 +752,12 @@ _lv2_osc_stream_run_udp(LV2_OSC_Stream *stream)
 					break;
 				}
 
-				fprintf(stderr, "%s: sendto: %s\n", __func__, strerror(errno));
+				ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				break;
 			}
 			else if(sent != (ssize_t)tosend)
 			{
-				fprintf(stderr, "%s: only sent %zi of %zu bytes", __func__, sent, tosend);
+				ev = LV2_OSC_STREAM_ERRNO(ev, EIO);
 				break;
 			}
 
@@ -783,7 +788,7 @@ _lv2_osc_stream_run_udp(LV2_OSC_Stream *stream)
 					break;
 				}
 
-				fprintf(stderr, "%s: recv: %s\n", __func__, strerror(errno));
+				ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				break;
 			}
 			else if(recvd == 0)
@@ -824,45 +829,41 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 
 				if(fcntl(stream->fd, F_SETFL, O_NONBLOCK) == -1)
 				{
-					fprintf(stderr, "%s: fcntl failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				}
 
 				if(setsockopt(stream->fd, stream->protocol,
 					TCP_NODELAY, &flag, sizeof(int)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				}
 
 				if(setsockopt(stream->sock, SOL_SOCKET,
 					SO_KEEPALIVE, &flag, sizeof(int)) != 0)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				}
 
 				if(setsockopt(stream->fd, SOL_SOCKET,
 					SO_SNDBUF, &sendbuff, sizeof(int))== -1)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				}
 
 				if(setsockopt(stream->fd, SOL_SOCKET,
 					SO_RCVBUF, &recvbuff, sizeof(int))== -1)
 				{
-					fprintf(stderr, "%s: setsockopt failed\n", __func__);
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 				}
 
-				stream->connected = true;
-				//fprintf(stderr, "%s: orderly accept\n", __func__);
-				//FIXME ev |=
+				stream->connected = true; // orderly accept
 			}
 		}
 		else
 		{
 			if(connect(stream->sock, &stream->peer.in, stream->peer.len) == 0)
 			{
-				stream->connected = true;
-				//fprintf(stderr, "%s: orderly (re)connect\n", __func__);
-				//FIXME ev |=
+				stream->connected = true; // orderly (re)connect
 			}
 		}
 	}
@@ -930,12 +931,12 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 					}
 
 					stream->connected = false;
-					fprintf(stderr, "%s: send: %s\n", __func__, strerror(errno));
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					break;
 				}
 				else if(sent != (ssize_t)tosend)
 				{
-					fprintf(stderr, "%s: only sent %zi of %zu bytes", __func__, sent, tosend);
+					ev = LV2_OSC_STREAM_ERRNO(ev, EIO);
 					break;
 				}
 
@@ -976,7 +977,7 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 						}
 
 						stream->connected = false;
-						fprintf(stderr, "%s: recv(slip): %s\n", __func__, strerror(errno));
+						ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 						break;
 					}
 					else if(recvd == 0)
@@ -988,8 +989,7 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 							stream->fd = -1;
 						}
 
-						stream->connected = false;
-						//fprintf(stderr, "%s: recv(slip): %s\n", __func__, "orderly shutdown");
+						stream->connected = false; // orderly shutdown
 						break;
 					}
 
@@ -1015,7 +1015,7 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 							else
 							{
 								parsed = 0;
-								fprintf(stderr, "%s: write buffer overflow\n", __func__);
+								ev = LV2_OSC_STREAM_ERRNO(ev, ENOMEM);
 							}
 						}
 
@@ -1073,7 +1073,7 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 						}
 
 						stream->connected = false;
-						fprintf(stderr, "%s: recv(prefix): %s\n", __func__, strerror(errno));
+						ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 						break;
 					}
 					else if(recvd == 0)
@@ -1085,8 +1085,7 @@ _lv2_osc_stream_run_tcp(LV2_OSC_Stream *stream)
 							stream->fd = -1;
 						}
 
-						stream->connected = false;
-						//fprintf(stderr, "%s: recv(prefix): %s\n", __func__, "orderly shutdown");
+						stream->connected = false; // orderly shutdown
 						break;
 					}
 
@@ -1163,12 +1162,12 @@ _lv2_osc_stream_run_ser(LV2_OSC_Stream *stream)
 						break;
 					}
 
-					fprintf(stderr, "%s: write: %s\n", __func__, strerror(errno));
+					ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 					break;
 				}
 				else if(sent != (ssize_t)tosend)
 				{
-					fprintf(stderr, "%s: only written %zi of %zu bytes", __func__, sent, tosend);
+					ev = LV2_OSC_STREAM_ERRNO(ev, EIO);
 					break;
 				}
 
@@ -1200,12 +1199,12 @@ _lv2_osc_stream_run_ser(LV2_OSC_Stream *stream)
 						}
 
 						stream->connected = false;
-						fprintf(stderr, "%s: read(slip): %s\n", __func__, strerror(errno));
+						ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 						break;
 					}
 					else if(recvd == 0)
 					{
-						//fprintf(stderr, "%s: read(slip): %s\n", __func__, "orderly shutdown");
+						// orderly shutdown
 						break;
 					}
 
@@ -1231,7 +1230,7 @@ _lv2_osc_stream_run_ser(LV2_OSC_Stream *stream)
 							else
 							{
 								parsed = 0;
-								fprintf(stderr, "%s: read buffer overflow\n", __func__);
+								ev = LV2_OSC_STREAM_ERRNO(ev, ENOMEM);
 							}
 						}
 
@@ -1283,12 +1282,12 @@ _lv2_osc_stream_run_ser(LV2_OSC_Stream *stream)
 						}
 
 						stream->connected = false;
-						fprintf(stderr, "%s: read(prefix): %s\n", __func__, strerror(errno));
+						ev = LV2_OSC_STREAM_ERRNO(ev, errno);
 						break;
 					}
 					else if(recvd == 0)
 					{
-						//fprintf(stderr, "%s: read(prefix): %s\n", __func__, "orderly shutdown");
+						// orderly shutdown
 						break;
 					}
 
