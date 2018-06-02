@@ -684,7 +684,7 @@ _thread_1(void *data)
 	do
 	{
 		ev = lv2_osc_stream_run(&stream);
-	} while( (ev & LV2_OSC_SEND) || stream.connected );
+	} while( (ev & LV2_OSC_SEND) || (ev & LV2_OSC_CONN) );
 
 	assert(pair->lossy || (count == COUNT) );
 
@@ -894,6 +894,14 @@ static const pair_t pairs [] = {
 		.client = "osc.prefix.tcp://[::1%lo]:9999",
 		.lossy = false
 	},
+
+#if 0
+	{
+		.server = "osc.serial:///dev/pts/4", //FIXME baudrate
+		.client = "osc.serial:///dev/pts/5",
+		.lossy = false
+	},
+#endif
 
 	{
 		.server = NULL,
