@@ -25,6 +25,7 @@
 #	include <sys/socket.h>
 #	include <net/if.h>
 #	include <netinet/tcp.h>
+#	include <netinet/in.h>
 #	include <netdb.h>
 #	include <termios.h>
 #endif
