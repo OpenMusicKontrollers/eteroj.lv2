@@ -125,7 +125,7 @@ struct _props_t {
 
 #define PROPS_T(PROPS, MAX_NIMPLS) \
 	props_t (PROPS); \
-	props_impl_t _impls [(MAX_NIMPLS-1)]
+	props_impl_t _impls [MAX_NIMPLS]
 
 // rt-safe
 static inline int
