@@ -501,7 +501,7 @@ _handle_enum(plughandle_t *handle, LV2_OSC_Enum ev)
 	{
 		strncpy(handle->state.osc_error, err, STR_LEN-1);
 
-		props_impl_t *impl = _props_bsearch(&handle->props, handle->uris.eteroj_error);
+		props_impl_t *impl = _props_impl_get(&handle->props, handle->uris.eteroj_error);
 		if(impl)
 		{
 			_props_impl_set(&handle->props, impl, handle->forge.String, strlen(err), err);
