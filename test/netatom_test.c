@@ -16,7 +16,6 @@
  */
 
 #include <time.h>
-#include <inttypes.h>
 #include <sratom/sratom.h>
 
 #define NETATOM_IMPLEMENTATION
@@ -101,9 +100,11 @@ _netatom_test(LV2_URID_Map *map, LV2_URID_Unmap *unmap, bool swap,
 		{
 			fwrite(buf_tx, size_tx, 1, stdout);
 
-			const uint32_t tot_size = lv2_atom_total_size(atom);
-			fprintf(stderr, "%"PRIu32", %"PRIuPTR", %lf\n", tot_size, size_tx,
+#if !defined(_WIN32)
+			const size_t tot_size = lv2_atom_total_size(atom);
+			fprintf(stderr, "%zu, %zu, %lf\n", tot_size, size_tx,
 					(double)size_tx / lv2_atom_total_size(atom));
+#endif
 		}
 
 		const LV2_Atom *atom_rx = netatom_deserialize(netatom, buf_tx, size_tx);
