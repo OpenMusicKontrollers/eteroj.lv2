@@ -88,6 +88,8 @@ struct _plughandle_t {
 		varchunk_t *to_worker;
 		varchunk_t *to_thread;
 	} data;
+
+	char *osc_url;
 };
 
 static inline list_t *
@@ -510,30 +512,37 @@ _handle_enum(plughandle_t *handle, LV2_OSC_Enum ev)
 		handle->status_updated = true;
 	}
 
-	const bool connected = (ev & LV2_OSC_CONN) ? true : false;
+	const bool connected = (ev & LV2_OSC_CONN) == LV2_OSC_CONN;
 
 	if(handle->state.osc_connected != connected)
 	{
+#if 0
+		if(handle->log)
+			lv2_log_trace(&handle->logger, "connected: %i\n", connected);
+#endif
+
 		handle->state.osc_connected = connected;
 		handle->status_updated = true;
 	}
 }
 
-static inline void
-_activate(plughandle_t *handle, const char *osc_url)
+static inline LV2_OSC_Enum
+_activate(plughandle_t *handle)
 {
-	if(!handle->rolling && osc_url)
+	if(!handle->rolling && handle->osc_url)
 	{
-		const LV2_OSC_Enum ev = lv2_osc_stream_init(&handle->data.stream, osc_url,
-			&handle->data.driver, handle);
-
-		_handle_enum(handle, ev);
+		const LV2_OSC_Enum ev = lv2_osc_stream_init(&handle->data.stream,
+			handle->osc_url, &handle->data.driver, handle);
 
 		if( (ev & LV2_OSC_ERR) == LV2_OSC_NONE)
 		{
 			handle->rolling = true;
 		}
+
+		return ev;
 	}
+
+	return LV2_OSC_NONE;
 }
 
 static void
@@ -541,7 +550,7 @@ activate(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	_activate(handle, NULL);
+	_activate(handle);
 }
 
 static inline void
@@ -572,6 +581,11 @@ cleanup(LV2_Handle instance)
 	varchunk_free(handle->data.to_worker);
 	varchunk_free(handle->data.to_thread);
 
+	if(handle->osc_url)
+	{
+		free(handle->osc_url);
+	}
+
 	munlock(handle, sizeof(plughandle_t));
 	free(handle);
 }
@@ -598,27 +612,35 @@ _work(LV2_Handle instance,
 
 		if(!strcmp(arg.path, "/eteroj/url"))
 		{
+			if(osc_url)
+			{
+				free(osc_url);
+			}
 			osc_url = strdup(arg.s);
-
-			_deactivate(handle);
 		}
 
 		varchunk_read_advance(handle->data.to_thread);
 	}
 
-	_activate(handle, osc_url);
-
 	if(osc_url)
 	{
-		free(osc_url);
+		if(handle->osc_url)
+		{
+			free(handle->osc_url);
+		}
+		handle->osc_url = osc_url;
+
+		_deactivate(handle);
 	}
+
+	LV2_OSC_Enum ev = _activate(handle);
 
 	if(handle->rolling)
 	{
-		const LV2_OSC_Enum ev = lv2_osc_stream_run(&handle->data.stream);
-
-		respond(target, sizeof(LV2_OSC_Enum), &ev);
+		ev |= lv2_osc_stream_run(&handle->data.stream);
 	}
+
+	respond(target, sizeof(LV2_OSC_Enum), &ev);
 
 	return LV2_WORKER_SUCCESS;
 }
