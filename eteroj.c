@@ -30,14 +30,12 @@ lv2_descriptor(uint32_t index)
 		case 0:
 			return &eteroj_io;
 		case 1:
-			return &eteroj_disk;
-		case 2:
 			return &eteroj_query;
-		case 3:
+		case 2:
 			return &eteroj_cloak;
-		case 4:
+		case 3:
 			return &eteroj_pack;
-		case 5:
+		case 4:
 			return &eteroj_ninja;
 		default:
 			return NULL;

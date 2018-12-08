@@ -122,65 +122,6 @@ eteroj:io
 		eteroj:url "osc.udp://localhost:9090" ;
 	] .
 
-# Disk Plugin
-eteroj:disk_record
-	a lv2:Parameter ;
-	rdfs:label "Record" ;
-	rdfs:comment "toggle whether to record or not" ;
-	rdfs:range atom:Bool .
-
-eteroj:disk_path
-	a lv2:Parameter ;
-	rdfs:label "File path" ;
-	rdfs:comment "file path to store recordings to" ;
-	rdfs:range atom:Path .
-
-eteroj:disk
-	a lv2:Plugin ,
-		lv2:ConverterPlugin ;
-	doap:name "Eteroj Disk" ;
-	doap:license lic:Artistic-2.0 ;
-	lv2:project proj:eteroj ;
-	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState, state:makePath ;
-	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
-	lv2:extensionData state:interface, work:interface ;
-
-	lv2:port [
-		# sink event port
-	  a lv2:InputPort ,
-			atom:AtomPort ;
-		atom:bufferType atom:Sequence ;
-		atom:supports time:Position ;
-		atom:supports atom:Object ;
-		atom:supports osc:Event ;
-		atom:supports patch:Message ;
-		lv2:index 0 ;
-		lv2:symbol "osc_in" ;
-		lv2:name "OSC Input" ;
-		lv2:designation lv2:control ;
-	] , [
-		# source event port
-	  a lv2:OutputPort ,
-			atom:AtomPort ;
-		atom:bufferType atom:Sequence ;
-		atom:supports atom:Object ;
-		atom:supports osc:Event ;
-		atom:supports patch:Message ;
-		lv2:index 1 ;
-		lv2:symbol "osc_out" ;
-		lv2:name "OSC Output" ;
-		lv2:designation lv2:control ;
-	] ;
- 
-	patch:writable
-		eteroj:disk_record ;
-	patch:readable
-		eteroj:disk_path ;
-
-	state:state [
-		eteroj:disk_record false ;
-	] .
-
 eteroj:query_refresh
 	a lv2:Parameter ;
 	rdfs:label "Refresh Introspection" ;

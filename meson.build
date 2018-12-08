@@ -97,7 +97,6 @@ if lv2lint.found()
 	test('LV2 lint', lv2lint,
 		args : ['-Ewarn',
 			'http://open-music-kontrollers.ch/lv2/eteroj#cloak',
-			'http://open-music-kontrollers.ch/lv2/eteroj#disk',
 			'http://open-music-kontrollers.ch/lv2/eteroj#io',
 			'http://open-music-kontrollers.ch/lv2/eteroj#ninja',
 			'http://open-music-kontrollers.ch/lv2/eteroj#pack',
