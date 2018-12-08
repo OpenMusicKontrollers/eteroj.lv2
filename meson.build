@@ -34,6 +34,8 @@ conf_data.set('MICRO_VERSION', version[2])
 add_project_arguments('-D_GNU_SOURCE', language : 'c')
 
 cp = find_program('cp')
+lv2_validate = find_program('lv2_validate', native : true, required : false)
+lv2lint = find_program('lv2lint', required : false)
 clone = [cp, '@INPUT@', '@OUTPUT@']
 
 c_args = ['-fvisibility=hidden',
@@ -74,14 +76,30 @@ mod = shared_module('eteroj', dsp_srcs,
 suffix = mod.full_path().strip().split('.')[-1]
 conf_data.set('MODULE_SUFFIX', '.' + suffix)
 
-configure_file(input : 'manifest.ttl.in', output : 'manifest.ttl',
+manifest_ttl = configure_file(input : 'manifest.ttl.in', output : 'manifest.ttl',
 	configuration : conf_data,
 	install : true,
 	install_dir : inst_dir)
 
-custom_target('dsp_ttl',
+dsp_ttl = custom_target('dsp_ttl',
 	input : 'eteroj.ttl',
 	output : 'eteroj.ttl',
 	command : clone,
 	install : true,
 	install_dir : inst_dir)
+
+if lv2_validate.found()
+	test('LV2 validate', lv2_validate,
+		args : [manifest_ttl, dsp_ttl])
+endif
+
+if lv2lint.found()
+	test('LV2 lint', lv2lint,
+		args : ['-Ewarn',
+			'http://open-music-kontrollers.ch/lv2/eteroj#cloak',
+			'http://open-music-kontrollers.ch/lv2/eteroj#disk',
+			'http://open-music-kontrollers.ch/lv2/eteroj#io',
+			'http://open-music-kontrollers.ch/lv2/eteroj#ninja',
+			'http://open-music-kontrollers.ch/lv2/eteroj#pack',
+			'http://open-music-kontrollers.ch/lv2/eteroj#query'])
+endif
