@@ -289,7 +289,7 @@ eteroj:ninja
 	doap:license lic:Artistic-2.0 ;
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState ;
-	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore ;
+	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore, log:log ;
 	lv2:extensionData state:interface, work:interface ;
 
 	# input event port

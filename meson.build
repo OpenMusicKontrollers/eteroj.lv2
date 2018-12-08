@@ -46,7 +46,6 @@ c_args = ['-fvisibility=hidden',
 
 dsp_srcs = ['eteroj.c',
 	'eteroj_cloak.c',
-	'eteroj_disk.c',
 	'eteroj_io.c',
 	'eteroj_ninja.c',
 	'eteroj_pack.c',

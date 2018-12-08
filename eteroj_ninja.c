@@ -50,7 +50,8 @@ struct _plughandle_t {
 	LV2_URID_Map *map;
 	LV2_URID_Unmap *unmap;
 	LV2_Worker_Schedule *sched;
-	LV2_Atom_Forge_Ref ref;
+	LV2_Log_Log *log;
+	LV2_Log_Logger logger;
 
 	atom_ser_t ser;
 
@@ -58,7 +59,12 @@ struct _plughandle_t {
 	LV2_Atom_Sequence *event_out;
 	LV2_Atom_Forge forge;
 	LV2_OSC_URID osc_urid;
-	int64_t frames;
+
+	struct {
+		LV2_Atom_Forge *forge;
+		LV2_Atom_Forge_Ref *ref;
+		int64_t frames;
+	} unroll;
 
 	netatom_t *netatom;
 
@@ -115,7 +121,6 @@ static const props_def_t defs [MAX_NPROPS] = {
 		.property = ETEROJ_URI"#ninja_synchronous",
 		.offset = offsetof(plugstate_t, synchronous),
 		.type = LV2_ATOM__Bool
-		//FIXME flush ringbuffers when changing from asynchronous to synchronous
 	}
 };
 
@@ -136,6 +141,8 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 			handle->unmap = features[i]->data;
 		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
 			handle->sched= features[i]->data;
+		else if(!strcmp(features[i]->URI, LV2_LOG__log))
+			handle->log = features[i]->data;
 	}
 
 	if(!handle->map)
@@ -159,6 +166,11 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 
 	lv2_atom_forge_init(&handle->forge, handle->map);
 	lv2_osc_urid_init(&handle->osc_urid, handle->map);
+
+	if(handle->log)
+	{
+		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
+	}
 
 	if(!props_init(&handle->props, descriptor->URI,
 		defs, MAX_NPROPS, &handle->state, &handle->stash,
@@ -214,7 +226,7 @@ static void
 _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 {
 	plughandle_t *handle = data;
-	LV2_Atom_Forge *forge = &handle->forge;
+	LV2_Atom_Forge *forge = handle->unroll.forge;
 
 	if(strcmp(path, base_path))
 		return;
@@ -229,15 +241,20 @@ _unroll(const char *path, const LV2_Atom_Tuple *arguments, void *data)
 		handle->buf, itr->size);
 	if(atom)
 	{
-		if(handle->ref)
-			handle->ref = lv2_atom_forge_frame_time(forge, handle->frames);
-		if(handle->ref)
-			handle->ref = lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
+		if(*handle->unroll.ref)
+			*handle->unroll.ref = lv2_atom_forge_frame_time(forge, handle->unroll.frames);
+		if(*handle->unroll.ref)
+			*handle->unroll.ref = lv2_atom_forge_write(forge, atom, lv2_atom_total_size(atom));
+	}
+	else if(handle->log)
+	{
+		lv2_log_trace(&handle->logger, "%s: failed to deserialize\n", __func__);
 	}
 }
 
 static void
-_convert_seq(plughandle_t *handle, LV2_Atom_Forge *forge, const LV2_Atom_Sequence *seq)
+_convert_seq(plughandle_t *handle, LV2_Atom_Forge *forge, const LV2_Atom_Sequence *seq,
+	LV2_Atom_Forge_Ref *ref)
 {
 	LV2_OSC_URID *osc_urid = &handle->osc_urid;
 
@@ -248,7 +265,10 @@ _convert_seq(plughandle_t *handle, LV2_Atom_Forge *forge, const LV2_Atom_Sequenc
 
 		if(lv2_osc_is_message_or_bundle_type(osc_urid, obj->body.otype))
 		{
-			handle->frames = ev->time.frames;
+			handle->unroll.frames = ev->time.frames;
+			handle->unroll.ref = ref;
+			handle->unroll.forge = forge;
+
 			lv2_osc_unroll(osc_urid, obj, _unroll, handle);
 		}
 		else
@@ -259,10 +279,14 @@ _convert_seq(plughandle_t *handle, LV2_Atom_Forge *forge, const LV2_Atom_Sequenc
 			const uint8_t *buf = netatom_serialize(handle->netatom, (LV2_Atom *)handle->buf, BUF_SIZE, &sz);
 			if(buf)
 			{
-				if(handle->ref)
-					handle->ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
-				if(handle->ref)
-					handle->ref = lv2_osc_forge_message_vararg(forge, osc_urid, base_path, "b", sz, buf);
+				if(*ref)
+					*ref = lv2_atom_forge_frame_time(forge, ev->time.frames);
+				if(*ref)
+					*ref = lv2_osc_forge_message_vararg(forge, osc_urid, base_path, "b", sz, buf);
+			}
+			else if(handle->log)
+			{
+				lv2_log_trace(&handle->logger, "%s: failed to serialize\n", __func__);
 			}
 		}
 	}
@@ -277,20 +301,20 @@ run(LV2_Handle instance, uint32_t nsamples)
 	const uint32_t capacity = handle->event_out->atom.size;
 	lv2_atom_forge_set_buffer(&handle->forge, (uint8_t *)handle->event_out, capacity);
 	LV2_Atom_Forge_Frame frame;
-	handle->ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
+	LV2_Atom_Forge_Ref ref = lv2_atom_forge_sequence_head(&handle->forge, &frame, 0);
 
-	props_idle(&handle->props, &handle->forge, 0, &handle->ref);
+	props_idle(&handle->props, &handle->forge, 0, &ref);
 
 	LV2_ATOM_SEQUENCE_FOREACH(handle->event_in, ev)
 	{
 		const LV2_Atom_Object *obj = (const LV2_Atom_Object *)&ev->body;
 
-		props_advance(&handle->props, &handle->forge, 0, obj, &handle->ref); //NOTE 0!
+		props_advance(&handle->props, &handle->forge, 0, obj, &ref); //NOTE 0!
 	}
 
 	if(handle->state.synchronous)
 	{
-		_convert_seq(handle, &handle->forge, handle->event_in);
+		_convert_seq(handle, &handle->forge, handle->event_in, &ref);
 	}
 	else // asynchronous
 	{
@@ -307,25 +331,31 @@ run(LV2_Handle instance, uint32_t nsamples)
 				const int32_t dummy;
 				handle->sched->schedule_work(handle->sched->handle, sizeof(int32_t), &dummy);
 			}
+			else if(handle->log)
+			{
+				lv2_log_trace(&handle->logger, "%s: ringbuffer overflow\n", __func__);
+			}
 		}
 
-		// move output events from worker thread
-		size_t size;
-		const LV2_Atom_Sequence *seq;
-		if((seq = varchunk_read_request(handle->from_worker, &size)))
 		{
-			LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+			// move output events from worker thread
+			size_t size;
+			const LV2_Atom_Sequence *seq;
+			if((seq = varchunk_read_request(handle->from_worker, &size)))
 			{
-				if(handle->ref)
-					handle->ref = lv2_atom_forge_frame_time(&handle->forge, ev->time.frames);
-				if(handle->ref)
-					handle->ref = lv2_atom_forge_write(&handle->forge, &ev->body, lv2_atom_total_size(&ev->body));
+				LV2_ATOM_SEQUENCE_FOREACH(seq, ev)
+				{
+					if(ref)
+						ref = lv2_atom_forge_frame_time(&handle->forge, ev->time.frames);
+					if(ref)
+						ref = lv2_atom_forge_write(&handle->forge, &ev->body, lv2_atom_total_size(&ev->body));
+				}
+				varchunk_read_advance(handle->from_worker);
 			}
-			varchunk_read_advance(handle->from_worker);
 		}
 	}
 
-	if(handle->ref)
+	if(ref)
 		lv2_atom_forge_pop(&handle->forge, &frame);
 	else
 		lv2_atom_sequence_clear(handle->event_out);
@@ -356,7 +386,7 @@ _work(LV2_Handle instance,
 	const void *body)
 {
 	plughandle_t *handle = instance;
-	LV2_Atom_Forge forge = handle->forge;
+	LV2_Atom_Forge forge = handle->forge; // clone forge
 	LV2_OSC_URID *osc_urid = &handle->osc_urid;
 
 	(void)respond;
@@ -371,12 +401,18 @@ _work(LV2_Handle instance,
 		handle->ser.offset = 0;
 		lv2_atom_forge_set_sink(&forge, _sink, _deref, &handle->ser);
 		LV2_Atom_Forge_Frame frame;
-		handle->ref = lv2_atom_forge_sequence_head(&forge, &frame, 0);
+		LV2_Atom_Forge_Ref ref = lv2_atom_forge_sequence_head(&forge, &frame, 0);
 
-		_convert_seq(handle, &forge, seq);
+		_convert_seq(handle, &forge, seq, &ref);
 
-		if(handle->ref)
+		if(ref)
+		{
 			lv2_atom_forge_pop(&forge, &frame);
+		}
+		else if(handle->log)
+		{
+			lv2_log_trace(&handle->logger, "%s: failed to forge\n", __func__);
+		}
 
 		seq = (const LV2_Atom_Sequence *)handle->ser.buf;
 		if(seq->atom.size > sizeof(LV2_Atom_Sequence_Body))
@@ -387,6 +423,10 @@ _work(LV2_Handle instance,
 			{
 				memcpy(dst, seq, len);
 				varchunk_write_advance(handle->from_worker, len);
+			}
+			else if(handle->log)
+			{
+				lv2_log_trace(&handle->logger, "%s: ringbuffer overflow\n", __func__);
 			}
 		}
 
