@@ -38,8 +38,6 @@ lv2_descriptor(uint32_t index)
 		case 4:
 			return &eteroj_pack;
 		case 5:
-			return &eteroj_control;
-		case 6:
 			return &eteroj_ninja;
 		default:
 			return NULL;
