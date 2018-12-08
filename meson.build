@@ -16,10 +16,9 @@ jsmn_inc = include_directories('jsmn')
 netatom_inc = include_directories('netatom.lv2')
 osc_inc = include_directories('osc.lv2')
 props_inc = include_directories('props.lv2')
-timely_inc = include_directories('timely.lv2')
 tlsf_inc = include_directories('tlsf-3.0')
 varchunk_inc = include_directories('varchunk')
-inc_dir = [jsmn_inc, netatom_inc, osc_inc, props_inc, timely_inc, tlsf_inc, varchunk_inc]
+inc_dir = [jsmn_inc, netatom_inc, osc_inc, props_inc, tlsf_inc, varchunk_inc]
 
 inst_dir = join_paths(get_option('libdir'), 'lv2', meson.project_name())
 
