@@ -53,6 +53,7 @@ struct _props_def_t {
 	const char *type;
 	const char *access;
 	size_t offset;
+	bool hidden;
 
 	uint32_t max_size;
 	props_event_cb_t event_cb;
@@ -378,7 +379,7 @@ _props_impl_restore(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 		_props_impl_unlock(impl, PROP_STATE_NONE);
 
-		if(*ref)
+		if(*ref && !impl->def->hidden)
 			*ref = _props_patch_set(props, forge, frames, impl, 0);
 
 		const props_def_t *def = impl->def;
@@ -604,7 +605,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			{
 				props_impl_t *impl = &props->impls[i];
 
-				if(*ref)
+				if(*ref && !impl->def->hidden)
 					*ref = _props_patch_set(props, forge, frames, impl, sequence_num);
 			}
 
@@ -616,18 +617,21 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 			if(impl)
 			{
-				*ref = _props_patch_set(props, forge, frames, impl, sequence_num);
+				if(*ref && !impl->def->hidden)
+					*ref = _props_patch_set(props, forge, frames, impl, sequence_num);
 
 				return 1;
 			}
 			else if(sequence_num)
 			{
-				*ref = _props_patch_error(props, forge, frames, sequence_num);
+				if(*ref)
+					*ref = _props_patch_error(props, forge, frames, sequence_num);
 			}
 		}
 		else if(sequence_num)
 		{
-			*ref = _props_patch_error(props, forge, frames, sequence_num);
+			if(*ref)
+				*ref = _props_patch_error(props, forge, frames, sequence_num);
 		}
 	}
 	else if(obj->body.otype == props->urid.patch_set)
@@ -662,7 +666,8 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		{
 			if(sequence_num)
 			{
-				*ref = _props_patch_error(props, forge, frames, sequence_num);
+				if(ref)
+					*ref = _props_patch_error(props, forge, frames, sequence_num);
 			}
 
 			return 0;
@@ -680,14 +685,16 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 			if(sequence_num)
 			{
-				*ref = _props_patch_ack(props, forge, frames, sequence_num);
+				if(*ref)
+					*ref = _props_patch_ack(props, forge, frames, sequence_num);
 			}
 
 			return 1;
 		}
 		else if(sequence_num)
 		{
-			*ref = _props_patch_error(props, forge, frames, sequence_num);
+			if(*ref)
+				*ref = _props_patch_error(props, forge, frames, sequence_num);
 		}
 	}
 	else if(obj->body.otype == props->urid.patch_put)
@@ -720,7 +727,8 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		{
 			if(sequence_num)
 			{
-				*ref = _props_patch_error(props, forge, frames, sequence_num);
+				if(*ref)
+					*ref = _props_patch_error(props, forge, frames, sequence_num);
 			}
 
 			return 0;
@@ -745,7 +753,8 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 		if(sequence_num)
 		{
-			*ref = _props_patch_ack(props, forge, frames, sequence_num);
+			if(*ref)
+				*ref = _props_patch_ack(props, forge, frames, sequence_num);
 		}
 
 		return 1;
@@ -764,7 +773,7 @@ props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	{
 		_props_impl_stash(props, impl);
 
-		if(*ref) //TODO use patch:sequenceNumber
+		if(*ref && !impl->def->hidden) //TODO use patch:sequenceNumber
 			*ref = _props_patch_set(props, forge, frames, impl, 0);
 	}
 }
