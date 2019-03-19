@@ -386,25 +386,19 @@ _unroll(plughandle_t *handle, const uint8_t *buf, size_t size)
 	{
 		LV2_OSC_Item *itm = OSC_READER_BUNDLE_BEGIN(&reader, size);
 
-		if(itm->timetag == LV2_OSC_IMMEDIATE) // immediate dispatch
+		// immediate dispatch ?
+		if( (itm->timetag == LV2_OSC_IMMEDIATE) || !handle->osc_sched )
 		{
 			_parse(handle, 0.0, buf, size);
 		}
 		else if(size <= MTU_SIZE)
 		{
-			double frames;
-			if(handle->osc_sched)
-			{
-				frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, itm->timetag);
-			}
-			else
-			{
-				frames = 0.0;
-			}
-
 			list_t *l = _add_list(handle);
 			if(l)
 			{
+				const double frames = handle->osc_sched->osc2frames(
+					handle->osc_sched->handle, itm->timetag);
+
 				l->frames = frames;
 				l->size = size;
 				memcpy(l->buf, buf, size);
