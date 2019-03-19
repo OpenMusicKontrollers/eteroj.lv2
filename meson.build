@@ -16,9 +16,8 @@ jsmn_inc = include_directories('jsmn')
 netatom_inc = include_directories('netatom.lv2')
 osc_inc = include_directories('osc.lv2')
 props_inc = include_directories('props.lv2')
-tlsf_inc = include_directories('tlsf-3.0')
 varchunk_inc = include_directories('varchunk')
-inc_dir = [jsmn_inc, netatom_inc, osc_inc, props_inc, tlsf_inc, varchunk_inc]
+inc_dir = [jsmn_inc, netatom_inc, osc_inc, props_inc, varchunk_inc]
 
 inst_dir = join_paths(get_option('libdir'), 'lv2', meson.project_name())
 
@@ -51,7 +50,6 @@ dsp_srcs = ['eteroj.c',
 	'eteroj_query.c']
 
 dsp_srcs += join_paths('jsmn', 'jsmn.c')
-dsp_srcs += join_paths('tlsf-3.0', 'tlsf.c')
 
 if host_machine.system() == 'windows'
 	dsp_deps += cc.find_library('ws2_32')

@@ -17,6 +17,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 
 #include <eteroj.h>
 #include <varchunk.h>
@@ -25,10 +26,10 @@
 #include <osc.lv2/forge.h>
 #include <osc.lv2/stream.h>
 #include <props.h>
-#include <tlsf.h>
 
-#define POOL_SIZE 0x800000 // 8M
 #define BUF_SIZE 0x100000 // 1M
+#define MTU_SIZE 1500
+#define LIST_SIZE 2048
 #define MAX_NPROPS 3
 #define STR_LEN 128
 
@@ -37,11 +38,9 @@ typedef struct _list_t list_t;
 typedef struct _plughandle_t plughandle_t;
 
 struct _list_t {
-	list_t *next;
 	double frames;
-
 	size_t size;
-	uint8_t buf [];
+	uint8_t buf [MTU_SIZE];
 };
 
 struct _plugstate_t {
@@ -77,9 +76,8 @@ struct _plughandle_t {
 	LV2_Atom_Sequence *osc_out;
 
 	LV2_OSC_Schedule *osc_sched;
-	list_t *list;
-	uint8_t mem [POOL_SIZE];
-	tlsf_t tlsf;
+	list_t list [LIST_SIZE];
+	unsigned nlist;
 
 	struct {
 		LV2_OSC_Driver driver;
@@ -91,27 +89,6 @@ struct _plughandle_t {
 
 	char *osc_url;
 };
-
-static inline list_t *
-_list_insert(list_t *root, list_t *item)
-{
-	if(!root || (item->frames < root->frames) ) // prepend
-	{
-		item->next = root;
-		return item;
-	}
-
-	list_t *l0;
-	for(l0 = root; l0->next != NULL; l0 = l0->next)
-	{
-		if(item->frames < l0->next->frames)
-			break; // found insertion point
-	}
-
-	item->next = l0->next; // is NULL at end of list
-	l0->next = item;
-	return root;
-}
 
 static LV2_State_Status
 _state_save(LV2_Handle instance, LV2_State_Store_Function store,
@@ -233,21 +210,34 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 {
 	plughandle_t *handle = calloc(1, sizeof(plughandle_t));
 	if(!handle)
+	{
 		return NULL;
+	}
+
 	mlock(handle, sizeof(plughandle_t));
 
 	for(unsigned i=0; features[i]; i++)
 	{
 		if(!strcmp(features[i]->URI, LV2_URID__map))
+		{
 			handle->map = features[i]->data;
+		}
 		else if(!strcmp(features[i]->URI, LV2_URID__unmap))
+		{
 			handle->unmap = features[i]->data;
+		}
 		else if(!strcmp(features[i]->URI, LV2_LOG__log))
+		{
 			handle->log = features[i]->data;
+		}
 		else if(!strcmp(features[i]->URI, LV2_OSC__schedule))
+		{
 			handle->osc_sched = features[i]->data;
+		}
 		else if(!strcmp(features[i]->URI, LV2_WORKER__schedule))
+		{
 			handle->sched= features[i]->data;
+		}
 	}
 
 	if(!handle->map || !handle->unmap)
@@ -264,10 +254,10 @@ instantiate(const LV2_Descriptor* descriptor, double rate,
 		return NULL;
 	}
 
-	handle->tlsf = tlsf_create_with_pool(handle->mem, POOL_SIZE);
-
 	if(handle->log)
+	{
 		lv2_log_logger_init(&handle->logger, handle->map, handle->log);
+	}
 	lv2_osc_urid_init(&handle->osc_urid, handle->map);
 	lv2_atom_forge_init(&handle->forge, handle->map);
 
@@ -318,14 +308,72 @@ connect_port(LV2_Handle instance, uint32_t port, void *data)
 	}
 }
 
+static inline list_t *
+_add_list(plughandle_t *handle)
+{
+	if(handle->nlist >= LIST_SIZE)
+	{
+		return NULL;
+	}
+
+	return &handle->list[handle->nlist++];
+}
+
+static inline void
+_invalidate_list(list_t *list)
+{
+	list->size = 0; // invalidate
+}
+
+static int
+_cmp(const void *a, const void *b)
+{
+	const list_t *A = a;
+	const list_t *B = b;
+
+	if(A->size && B->size)
+	{
+		if(A->frames < B->frames)
+		{
+			return -1;
+		}
+		else if(A->frames > B->frames)
+		{
+			return 1;
+		}
+
+		return 0;
+	}
+	else if(A->size)
+	{
+		return -1;
+	}
+	else if(B->size)
+	{
+		return 1;
+	}
+
+	return 0;
+}
+
+static inline void
+_sort_list(plughandle_t *handle)
+{
+	qsort(handle->list, handle->nlist, sizeof(list_t), _cmp);
+}
+
 static inline void
 _parse(plughandle_t *handle, double frames, const uint8_t *buf, size_t size)
 {
 	if(handle->ref)
+	{
 		handle->ref = lv2_atom_forge_frame_time(&handle->forge, frames);
+	}
 	if(handle->ref)
-		handle->ref = lv2_osc_forge_packet(&handle->forge, &handle->osc_urid, handle->map,
-			buf, size);
+	{
+		handle->ref = lv2_osc_forge_packet(&handle->forge, &handle->osc_urid,
+			handle->map, buf, size);
+	}
 }
 
 static inline void 
@@ -342,26 +390,33 @@ _unroll(plughandle_t *handle, const uint8_t *buf, size_t size)
 		{
 			_parse(handle, 0.0, buf, size);
 		}
-		else // schedule dispatch
+		else if(size <= MTU_SIZE)
 		{
 			double frames;
 			if(handle->osc_sched)
+			{
 				frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, itm->timetag);
+			}
 			else
+			{
 				frames = 0.0;
+			}
 
-			// add event to list
-			list_t *l = tlsf_malloc(handle->tlsf, sizeof(list_t) + size);
+			list_t *l = _add_list(handle);
 			if(l)
 			{
 				l->frames = frames;
 				l->size = size;
 				memcpy(l->buf, buf, size);
-
-				handle->list = _list_insert(handle->list, l);
 			}
 			else if(handle->log)
+			{
 				lv2_log_trace(&handle->logger, "message pool overflow");
+			}
+		}
+		else if(handle->log)
+		{
+			lv2_log_trace(&handle->logger, "message too long");
 		}
 	}
 	else if(lv2_osc_reader_is_message(&reader)) // immediate dispatch
@@ -412,7 +467,9 @@ run(LV2_Handle instance, uint32_t nsamples)
 					}
 				}
 				else if(handle->log)
+				{
 					lv2_log_trace(&handle->logger, "output ringbuffer overflow");
+				}
 			}
 		}
 	}
@@ -424,17 +481,23 @@ run(LV2_Handle instance, uint32_t nsamples)
 	// reschedule scheduled bundles
 	if(handle->osc_sched)
 	{
-		for(list_t *l = handle->list; l; l = l->next)
+		for(list_t *l = handle->list; l->size; l++)
 		{
 			uint64_t time = be64toh(*(uint64_t *)(l->buf + 8));
 
 			double frames = handle->osc_sched->osc2frames(handle->osc_sched->handle, time);
 			if(frames < 0.0) // we may occasionally get -1 frames events when rescheduling
+			{
 				l->frames = 0.0;
+			}
 			else
+			{
 				l->frames = frames;
+			}
 		}
 	}
+
+	const unsigned nlist = handle->nlist;
 
 	// read incoming data
 	const uint8_t *ptr;
@@ -446,13 +509,25 @@ run(LV2_Handle instance, uint32_t nsamples)
 		varchunk_read_advance(handle->data.from_worker);
 	}
 
+	const unsigned added = handle->nlist - nlist;
+
+	if(added)
+	{
+		_sort_list(handle);
+	}
+
+	unsigned deleted = 0;
+
 	// handle scheduled bundles
-	for(list_t *l = handle->list; l; )
+	for(list_t *l = handle->list; l->size; l++)
 	{
 		if(l->frames < 0.0) // late event
 		{
 			if(handle->log)
+			{
 				lv2_log_trace(&handle->logger, "late event: %lf samples", l->frames);
+			}
+
 			l->frames = 0.0; // dispatch as early as possible
 		}
 		else if(l->frames >= nsamples) // not scheduled for this period
@@ -462,10 +537,14 @@ run(LV2_Handle instance, uint32_t nsamples)
 
 		_parse(handle, l->frames, l->buf, l->size);
 
-		list_t *l0 = l;
-		l = l->next;
-		handle->list = l;
-		tlsf_free(handle->tlsf, l0);
+		_invalidate_list(l);
+		deleted++;
+	}
+
+	if(deleted)
+	{
+		_sort_list(handle);
+		handle->nlist -= deleted;
 	}
 
 	if(handle->status_updated)
@@ -477,9 +556,13 @@ run(LV2_Handle instance, uint32_t nsamples)
 	}
 
 	if(handle->ref)
+	{
 		lv2_atom_forge_pop(forge, &frame);
+	}
 	else
+	{
 		lv2_atom_sequence_clear(handle->osc_out);
+	}
 }
 
 static inline void
@@ -493,10 +576,14 @@ _handle_enum(plughandle_t *handle, LV2_OSC_Enum ev)
 		err = strerror_r(ev & LV2_OSC_ERR, buf, sizeof(buf));
 
 		if(!err)
+		{
 			err = "Unknown";
+		}
 
 		if(handle->log)
+		{
 			lv2_log_trace(&handle->logger, "%s\n", err);
+		}
 	}
 
 	if(strcmp(handle->state.osc_error, err))
@@ -576,7 +663,6 @@ cleanup(LV2_Handle instance)
 {
 	plughandle_t *handle = instance;
 
-	tlsf_destroy(handle->tlsf);
 	varchunk_free(handle->data.from_worker);
 	varchunk_free(handle->data.to_worker);
 	varchunk_free(handle->data.to_thread);
@@ -680,9 +766,13 @@ static const void*
 extension_data(const char* uri)
 {
 	if(!strcmp(uri, LV2_WORKER__interface))
+	{
 		return &work_iface;
+	}
 	else if(!strcmp(uri, LV2_STATE__interface))
+	{
 		return &state_iface;
+	}
 
 	return NULL;
 }
