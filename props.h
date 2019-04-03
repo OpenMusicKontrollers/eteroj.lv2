@@ -152,6 +152,11 @@ props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 
 // rt-safe
 static inline void
+props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
+	LV2_URID property, LV2_Atom_Forge_Ref *ref);
+
+// rt-safe
+static inline void
 props_stash(props_t *props, LV2_URID property);
 
 // rt-safe
@@ -224,40 +229,52 @@ _props_restoring_set(props_t *props)
 	atomic_store_explicit(&props->restoring, true, memory_order_release);
 }
 
-static inline props_impl_t *
-_props_impl_get(props_t *props, LV2_URID property)
+static inline void
+_props_qsort(props_impl_t *A, int n)
 {
-	for(unsigned i = 0, idx = (property + i) % props->nimpls;
-		i < props->nimpls;
-		i++, idx = (property + i) % props->nimpls)
-	{
-		props_impl_t *impl = &props->impls[idx];
+	if(n < 2)
+		return;
 
-		if(impl->property == property)
-		{
-			return impl;
-		}
+	const props_impl_t *p = A;
+
+	int i = -1;
+	int j = n;
+
+	while(true)
+	{
+		do {
+			i += 1;
+		} while(A[i].property < p->property);
+
+		do {
+			j -= 1;
+		} while(A[j].property > p->property);
+
+		if(i >= j)
+			break;
+
+		const props_impl_t tmp = A[i];
+		A[i] = A[j];
+		A[j] = tmp;
 	}
 
-	return NULL;
+	_props_qsort(A, j + 1);
+	_props_qsort(A + j + 1, n - j - 1);
 }
 
 static inline props_impl_t *
-_props_impl_add(props_t *props, LV2_URID property)
+_props_bsearch(props_t *props, LV2_URID property)
 {
-	for(unsigned i = 0, idx = (property + i) % props->nimpls;
-		i < props->nimpls;
-		i++, idx = (property + i) % props->nimpls)
-	{
-		props_impl_t *impl = &props->impls[idx];
+	props_impl_t *base = props->impls;
 
-		if(impl->property == 0)
-		{
-			return impl;
-		}
+	for(int N = props->nimpls, half; N > 1; N -= half)
+	{
+		half = N/2;
+		props_impl_t *dst = &base[half];
+		base = (dst->property > property) ? base : dst;
 	}
 
-	return NULL;
+	return (base->property == property) ? base : NULL;
 }
 
 static inline LV2_Atom_Forge_Ref
@@ -298,6 +315,44 @@ _props_patch_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			ref = lv2_atom_forge_atom(forge, impl->value.size, impl->type);
 		if(ref)
 			ref = lv2_atom_forge_write(forge, impl->value.body, impl->value.size);
+	}
+	if(ref)
+		lv2_atom_forge_pop(forge, &obj_frame);
+
+	return ref;
+}
+
+static inline LV2_Atom_Forge_Ref
+_props_patch_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
+	props_impl_t *impl, int32_t sequence_num)
+{
+	LV2_Atom_Forge_Frame obj_frame;
+
+	LV2_Atom_Forge_Ref ref = lv2_atom_forge_frame_time(forge, frames);
+
+	if(ref)
+		ref = lv2_atom_forge_object(forge, &obj_frame, 0, props->urid.patch_get);
+	{
+		if(props->urid.subject) // is optional
+		{
+			if(ref)
+				ref = lv2_atom_forge_key(forge, props->urid.patch_subject);
+			if(ref)
+				ref = lv2_atom_forge_urid(forge, props->urid.subject);
+		}
+
+		if(sequence_num) // is optional
+		{
+			if(ref)
+				ref = lv2_atom_forge_key(forge, props->urid.patch_sequence);
+			if(ref)
+				ref = lv2_atom_forge_int(forge, sequence_num);
+		}
+
+		if(ref)
+			ref = lv2_atom_forge_key(forge, props->urid.patch_property);
+		if(ref)
+			ref = lv2_atom_forge_urid(forge, impl->property);
 	}
 	if(ref)
 		lv2_atom_forge_pop(forge, &obj_frame);
@@ -406,7 +461,7 @@ static inline int
 _props_impl_init(props_t *props, props_impl_t *impl, const props_def_t *def,
 	void *value_base, void *stash_base, LV2_URID_Map *map)
 {
-	if(!impl || !def->property || !def->type)
+	if(!def->property || !def->type)
 		return 0;
 
 	const LV2_URID type = map->map(map->handle, def->type);
@@ -525,13 +580,13 @@ props_init(props_t *props, const char *subject,
 	int status = 1;
 	for(unsigned i = 0; i < props->nimpls; i++)
 	{
-		const props_def_t *def = &defs[i];
-		const LV2_URID property = map->map(map->handle, def->property);
-		props_impl_t *impl = _props_impl_add(props, property);
+		props_impl_t *impl = &props->impls[i];
 
 		status = status
-			&& _props_impl_init(props, impl, def, value_base, stash_base, map);
+			&& _props_impl_init(props, impl, &defs[i], value_base, stash_base, map);
 	}
+
+	_props_qsort(props->impls, props->nimpls);
 
 	return status;
 }
@@ -613,7 +668,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 		}
 		else if(property->atom.type == props->urid.atom_urid)
 		{
-			props_impl_t *impl = _props_impl_get(props, property->body);
+			props_impl_t *impl = _props_bsearch(props, property->body);
 
 			if(impl)
 			{
@@ -673,7 +728,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			return 0;
 		}
 
-		props_impl_t *impl = _props_impl_get(props, property->body);
+		props_impl_t *impl = _props_bsearch(props, property->body);
 		if(impl && (impl->access == props->urid.patch_writable) )
 		{
 			_props_impl_set(props, impl, value->type, value->size,
@@ -739,7 +794,7 @@ props_advance(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 			const LV2_URID property = prop->key;
 			const LV2_Atom *value = &prop->value;
 
-			props_impl_t *impl = _props_impl_get(props, property);
+			props_impl_t *impl = _props_bsearch(props, property);
 			if(impl && (impl->access == props->urid.patch_writable) )
 			{
 				_props_impl_set(props, impl, value->type, value->size,
@@ -767,7 +822,7 @@ static inline void
 props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 	LV2_URID property, LV2_Atom_Forge_Ref *ref)
 {
-	props_impl_t *impl = _props_impl_get(props, property);
+	props_impl_t *impl = _props_bsearch(props, property);
 
 	if(impl)
 	{
@@ -779,9 +834,22 @@ props_set(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
 }
 
 static inline void
+props_get(props_t *props, LV2_Atom_Forge *forge, uint32_t frames,
+	LV2_URID property, LV2_Atom_Forge_Ref *ref)
+{
+	props_impl_t *impl = _props_bsearch(props, property);
+
+	if(impl)
+	{
+		if(*ref && !impl->def->hidden) //TODO use patch:sequenceNumber
+			*ref = _props_patch_get(props, forge, frames, impl, 0);
+	}
+}
+
+static inline void
 props_stash(props_t *props, LV2_URID property)
 {
-	props_impl_t *impl = _props_impl_get(props, property);
+	props_impl_t *impl = _props_bsearch(props, property);
 
 	if(impl)
 		_props_impl_stash(props, impl);
@@ -804,7 +872,7 @@ props_map(props_t *props, const char *uri)
 static inline const char *
 props_unmap(props_t *props, LV2_URID property)
 {
-	props_impl_t *impl = _props_impl_get(props, property);
+	props_impl_t *impl = _props_bsearch(props, property);
 
 	if(impl)
 		return impl->def->property;
