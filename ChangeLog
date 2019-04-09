@@ -1,0 +1,30 @@
+# Changelog
+
+## [0.6.0] - 15 Apr 2019
+
+### Added
+
+* synchronous mode in eteroj:ninja (needs lock-free urid:map implementation)
+* connection status reporting in eteroj:io
+* connection errors reporting in eteroj:io
+
+### Changed
+
+* build system from CMake to meson
+* from libuv to pure POSIX network sockets
+* increase buffer sizes in eteroj:io
+* from lv2_atom_object_query to lv2_atom_object_get (GCC bug)
+* to fixed size scheduling array in eteroj:io
+* dispatching bundles immediately if no support for osc:sched (host feature)
+
+### Fixed
+
+* endian headers for BSDs
+* running forbidden custom worker thread in eteroj:io
+* broken automatic reconnections for lost UDP/TCP links in eteroj:io
+
+### Deprecated
+
+* support for mingw (POSIX sockets)
+* eteroj:control plugin
+* eteroj:disk plugin
