@@ -29,7 +29,7 @@
 
 #define BUF_SIZE 0x100000 // 1M
 #define MTU_SIZE 1500
-#define LIST_SIZE 2048
+#define LIST_SIZE 8192
 #define MAX_NPROPS 3
 #define STR_LEN 128
 
