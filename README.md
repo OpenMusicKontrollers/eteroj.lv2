@@ -2,6 +2,20 @@
 
 ### Open Sound Control inside LV2 plugin graphs
 
+This LV2 plugin bundle allows you to handle OSC (Open Sound Control) bundles and
+messages in modular hosts.
+
+* Insert/dispatch OSC from/to UDP, TCP (IPv4/6) and serial sockets
+* Pack/unpack MIDI into OSC
+* Pack/unpack OSC into MIDI
+* Pack/unpack LV2 atoms into OSC
+
+Makes only sense to be used in hosts that allow
+routing of LV2 atom messages between plugins, e.g.
+
+* <http://drobilla.net/software/ingen>,
+* <https://open-music-kontrollers.ch/lv2/synthpod>.
+
 #### Build status
 
 [![build status](https://gitlab.com/OpenMusicKontrollers/eteroj.lv2/badges/master/build.svg)](https://gitlab.com/OpenMusicKontrollers/eteroj.lv2/commits/master)
