@@ -31,7 +31,7 @@ folder out of the platform folder of the downloaded package into your
 
 #### Stable release
 
-* [eteroj.lv2-0.4.0.zip](https://dl.open-music-kontrollers.ch/eteroj.lv2/stable/eteroj.lv2-0.4.0.zip) ([sig](https://dl.open-music-kontrollers.ch/eteroj.lv2/stable/eteroj.lv2-0.4.0.zip.sig))
+* [eteroj.lv2-0.6.0.zip](https://dl.open-music-kontrollers.ch/eteroj.lv2/stable/eteroj.lv2-0.6.0.zip) ([sig](https://dl.open-music-kontrollers.ch/eteroj.lv2/stable/eteroj.lv2-0.6.0.zip.sig))
 
 #### Unstable (nightly) release
 
@@ -41,7 +41,7 @@ folder out of the platform folder of the downloaded package into your
 
 #### Stable release
 
-* [eteroj.lv2-0.4.0.tar.xz](https://git.open-music-kontrollers.ch/lv2/eteroj.lv2/snapshot/eteroj.lv2-0.4.0.tar.xz)
+* [eteroj.lv2-0.6.0.tar.xz](https://git.open-music-kontrollers.ch/lv2/eteroj.lv2/snapshot/eteroj.lv2-0.6.0.tar.xz)
 
 #### Git repository
 
