@@ -13,8 +13,8 @@ messages in modular hosts.
 Makes only sense to be used in hosts that allow
 routing of LV2 atom messages between plugins, e.g.
 
-* <http://drobilla.net/software/ingen>,
-* <https://open-music-kontrollers.ch/lv2/synthpod>.
+* <http://drobilla.net/software/ingen>
+* <https://open-music-kontrollers.ch/lv2/synthpod>
 
 #### Build status
 
