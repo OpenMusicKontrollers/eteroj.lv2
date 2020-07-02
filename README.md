@@ -70,14 +70,56 @@ A plugin able to inject/eject [OSC](http://opensoundcontrol.org)
 packets into/from the plugin graph to/from network and serial lines. The
 non-realtime network part of the plugin supports OSC via bidirectional UDP
 and TCP on top of IPv4/IPv6 and OSC via serial lines which is handy for
-interfacing to microcontrollers via U(S)ART and USB. Stream based connections
-(TCP, Serial) support both size-prefix and SLIP framing.
+interfacing to microcontrollers via U(S)ART and USB. TCP based connections
+support both (deprecated) size-prefix and SLIP framing (default).
 
 Internally to the plugin graph, OSC packets are routed as first-class
 LV2 Atom objects, making the plugin compliant with any existing hosts.
 
 Timestamped OSC bundles are injected into the plugin graph with sample
 accuracy.
+
+The supported Urls are as follows:
+
+	// UDP IPv4 unicast server/client on port 2222
+	osc.udp://:2222
+	osc.udp://localhost:2222
+	
+	// UDP IPv6 unicast server/client on port 3333
+	osc.udp://[]:3333
+	osc.udp://[::1]:3333
+
+	// UDP IPv4 broadcast server/client on port 3344
+	osc.udp://:3344
+	osc.udp://255.255.255.255:3344
+
+	// TCP IPv4 server/client on port 4444 (SLIP encoded)
+	osc.tcp://:4444
+	osc.tcp://localhost:4444
+
+	// TCP IPv6 server/client on port 5555 (SLIP encoded)
+	osc.tcp://[]:5555
+	osc.tcp://[::1]:5555
+
+	// TCP IPv4 server/client on port 6666 (SLIP encoded)
+	osc.slip.tcp://:6666
+	osc.slip.tcp://localhost:6666
+	
+	// TCP IPv6 server/client on port 7777 (SLIP encoded)
+	osc.slip.tcp://[]:7777
+	osc.slip.tcp://[::1]:7777
+	
+	// TCP IPv4 server/client on port 8888 (int32 size-prefixed)
+	osc.prefix.tcp://:8888
+	osc.prefix.tcp://localhost:8888
+	
+	// TCP IPv6 server/client on port 9999 bound to loopback interface (int32 size-prefixed)
+	osc.prefix.tcp://[%lo]:9999
+	osc.prefix.tcp://[::1%lo]:9999
+
+	// Serial server/client on /dev/ttyUSB0 (SLIP encoded)
+	osc.serial:///dev/ttyUSB0
+
 
 ### Ninja
 
