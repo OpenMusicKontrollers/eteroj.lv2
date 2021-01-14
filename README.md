@@ -141,7 +141,7 @@ device to transparently to LV2 properties.
 
 #### License
 
-Copyright (c) 2016-2019 Hanspeter Portner (dev@open-music-kontrollers.ch)
+Copyright (c) 2016-2021 Hanspeter Portner (dev@open-music-kontrollers.ch)
 
 This is free software: you can redistribute it and/or modify
 it under the terms of the Artistic License 2.0 as published by
