@@ -40,7 +40,7 @@ folder out of the platform folder of the downloaded package into your
 
 #### Stable release
 
-* [eteroj.lv2-0.8.0.tar.xz](https://git.open-music-kontrollers.ch/lv2/eteroj.lv2/snapshot/eteroj.lv2-0.8.0.tar.xz)
+* [eteroj.lv2-0.8.0.tar.xz](https://git.open-music-kontrollers.ch/lv2/eteroj.lv2/snapshot/eteroj.lv2-0.8.0.tar.xz)([sig](https://git.open-music-kontrollers.ch/lv2/eteroj.lv2/snapshot/eteroj.lv2-0.8.0.tar.xz.asc))
 
 #### Git repository
 
