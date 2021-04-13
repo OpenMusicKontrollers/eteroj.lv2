@@ -30,7 +30,6 @@
 @prefix rsz:			<http://lv2plug.in/ns/ext/resize-port#> .
 @prefix xsd:			<http://www.w3.org/2001/XMLSchema#> .
 
-@prefix lic:			<http://opensource.org/licenses/> .
 @prefix omk:			<http://open-music-kontrollers.ch/ventosus#> .
 @prefix proj:			<http://open-music-kontrollers.ch/lv2/> .
 @prefix eteroj:		<http://open-music-kontrollers.ch/lv2/eteroj#> .
@@ -78,7 +77,7 @@ eteroj:io
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
 	doap:name "Eteroj IO" ;
-	doap:license lic:Artistic-2.0 ;
+	doap:license <https://spdx.org/licenses/Artistic-2.0> ;
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap, work:schedule , state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
@@ -133,7 +132,7 @@ eteroj:query
 	a lv2:Plugin ,
 		lv2:ConverterPlugin ;
 	doap:name "Eteroj Query" ;
-	doap:license lic:Artistic-2.0 ;
+	doap:license <https://spdx.org/licenses/Artistic-2.0> ;
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
@@ -179,7 +178,7 @@ eteroj:cloak
 	a lv2:Plugin,
 		lv2:ConverterPlugin;
 	doap:name "Eteroj (De)Cloak" ;
-	doap:license lic:Artistic-2.0 ;
+	doap:license <https://spdx.org/licenses/Artistic-2.0> ;
 	lv2:project proj:eteroj ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable ;
 	lv2:requiredFeature urid:map, urid:unmap ;
@@ -230,7 +229,7 @@ eteroj:pack
 	a lv2:Plugin,
 		lv2:ConverterPlugin;
 	doap:name "Eteroj (Un)Pack" ;
-	doap:license lic:Artistic-2.0 ;
+	doap:license <https://spdx.org/licenses/Artistic-2.0> ;
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive , lv2:hardRTCapable, state:threadSafeRestore ;
@@ -286,7 +285,7 @@ eteroj:ninja
 	a lv2:Plugin,
 		lv2:ConverterPlugin;
 	doap:name "Eteroj Ninja" ;
-	doap:license lic:Artistic-2.0 ;
+	doap:license <https://spdx.org/licenses/Artistic-2.0> ;
 	lv2:project proj:eteroj ;
 	lv2:requiredFeature urid:map, urid:unmap, work:schedule, state:loadDefaultState ;
 	lv2:optionalFeature lv2:isLive, lv2:hardRTCapable, state:threadSafeRestore, log:log ;
