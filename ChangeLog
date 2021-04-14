@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.10.0] - 14 Apr 2021
+
+### Fixed 
+
+* license URI in turtle manifest
+
 ## [0.8.0] - 15 Jan 2021
 
 ### Added 
